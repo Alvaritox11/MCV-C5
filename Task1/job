@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -n 4
+#SBATCH --mem 24G
+#SBATCH -p mhigh
+#SBATCH --gres gpu:1
+#SBATCH -o logs/out.log
+#SBATCH -e logs/err.log 
+
+# source activate c5_env
+
+python main.py --model detr --mode eval --batch_size 8

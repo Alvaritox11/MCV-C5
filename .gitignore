@@ -1,0 +1,7 @@
+# Folders
+__pycache__
+logs/
+
+# Files
+*.txt
+*.png
