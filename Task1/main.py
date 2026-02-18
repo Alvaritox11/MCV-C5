@@ -28,8 +28,8 @@ def get_args():
 
     # ---- wandb ----
     parser.add_argument('--use_wandb', action='store_true', help='Enable Weights & Biases logging')
-    parser.add_argument('--wandb_project', type=str, default='c5-kitti-mots-FRNN', help='wandb project name')
-    parser.add_argument('--wandb_entity', type=str, default='C5-team5', help='wandb entity/team (optional)')
+    parser.add_argument('--wandb_project', type=str, default='FRNN', help='wandb project name')
+    parser.add_argument('--wandb_entity', type=str, default='Team5-C5', help='wandb entity/team (optional)')
     parser.add_argument('--wandb_run_name', type=str, default=None, help='wandb run name (optional)')
     parser.add_argument('--wandb_tags', type=str, default='', help='Comma-separated wandb tags (optional)')
     parser.add_argument('--wandb_notes', type=str, default='', help='wandb notes (optional)')
