@@ -9,7 +9,7 @@ from src.metrics import CocoEvaluator
 
 from src.models.detr_wrapper import DetrWrapper
 from src.models.frnn_wrapper import FasterRCNNWrapper
-# from src.models.yolo_wrapper import YoloWrapper
+from src.models.yolo_wrapper import YoloWrapper
 # from src.models.rcnn_wrapper import FasterRCNNWrapper
 
 
@@ -42,8 +42,7 @@ def get_model(args):
         dataset = KittiMotsDataset_HF(root_dir=args.data_root, split='val')
         return DetrWrapper(device=args.device), dataset
     elif args.model == 'yolo':
-        # return YoloWrapper(args)
-        raise NotImplementedError("YOLO wrapper not wired yet")
+        return YoloWrapper(args)
     elif args.model == 'fasterrcnn':
         # return FasterRCNNWrapper(args)
         dataset = KittiMotsDataset_FRNN(root_dir=args.data_root, split='val')
