@@ -1,6 +1,7 @@
 # Folders
 __pycache__
 logs/
+wandb/
 
 # Files
 *.txt
