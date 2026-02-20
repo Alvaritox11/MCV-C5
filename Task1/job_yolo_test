@@ -7,12 +7,8 @@
 #SBATCH -o logs/yolo_smoke_%u_%j.out
 #SBATCH -e logs/yolo_smoke_%u_%j.err
 
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="Team5-C5"
+export WANDB_PROJECT="YOLO"
 
-DATA=~/KITTI-MOTS_YOLO/data.yaml
-MODEL=yolo26x.pt
-
-yolo detect train \
-  model=$MODEL \
-  data=$DATA \
-  imgsz=640 epochs=3 batch=16 device=0 \
-  workers=8
+python main_yolo.py --config configs/yolo_config.json
