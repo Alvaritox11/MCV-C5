@@ -1,0 +1,13 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "DETR",
+    "wandb_run_name": "detr_inference",
+
+    "mode": "evaluate", 
+    "model_type": "detr", 
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+
+    "batch_size": 2,
+    "confidence_threshold": 0.5,
+    "apply_augmentations": false
+}

@@ -1,0 +1,17 @@
+#!/bin/bash 
+#SBATCH -n 4                    # Number of cores
+#SBATCH --mem 20000             # 16GB asked
+#SBATCH -p mhigh                # Choose mlow to submit to master low prioriy queue
+#SBATCH -q masterhigh           # Requeue other users mlow jobs
+#SBATCH --gres gpu:1            # To ask Pascales MAX 8
+#SBATCH -o logs/out_%u_%j.log   # File to which STDOUT will be written
+#SBATCH -e logs/err_%u_%j.log   # File to which STDERR will be written
+
+# source activate c5_env
+
+# python main.py --mode eval --model detr --use_wandb \
+#   --wandb_entity Team5-C5 \
+#   --wandb_project DETR \
+#   --wandb_run_name DETR_1st_run
+
+python main.py --config configs/some_experiments/frnn_fine_tuning.json

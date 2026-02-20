@@ -4,7 +4,7 @@ from torchvision.transforms import functional as F
 
 
 class FasterRCNNWrapper:
-    def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3)):
+    def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3), freeze_base=False): # Freeze base experiment
         """
         TorchVision Faster R-CNN wrapper using the COCO head (91 classes).
 
@@ -17,6 +17,16 @@ class FasterRCNNWrapper:
 
         # Load pretrained model WITH COCO head (do not replace predictor)
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights)
+        
+        # --- For the experiment fine-tune. i hope it works ---
+        if freeze_base:
+            print("Freezing Faster R-CNN base. Training head only...")
+            for name, param in self.model.named_parameters():
+                # Freeze everything EXCEPT the final predictor head
+                if "roi_heads.box_predictor" not in name:
+                    param.requires_grad = False
+        # ------------------------------------------
+        
         self.model.to(self.device)
         self.model.eval()
 

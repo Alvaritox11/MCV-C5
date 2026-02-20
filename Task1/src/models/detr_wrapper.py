@@ -3,7 +3,7 @@ from transformers import DetrImageProcessor, DetrForObjectDetection
 from PIL import Image
 
 class DetrWrapper:
-    def __init__(self, model_name="facebook/detr-resnet-50", device=None):
+    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False):
         """
         Initializes the DETR model and processor from HuggingFace.
         
@@ -18,12 +18,22 @@ class DetrWrapper:
         
         # Load the processor (handles resizing, normalization specific to DETR)
         self.processor = DetrImageProcessor.from_pretrained(model_name)
-        
         # Load the model with the correct head for object detection
         self.model = DetrForObjectDetection.from_pretrained(model_name)
+        
+        # --- for the fine tune experiment ---
+        if freeze_base:
+            print("Freezing DETR base. Training heads only...")
+            for name, param in self.model.named_parameters():
+                # Freeze everything EXCEPT the classification and bounding box heads
+                if "class_labels_classifier" not in name and "bbox_predictor" not in name:
+                    param.requires_grad = False
+        # ------------------------------------------
+        
+        
         self.model.to(self.device)
         self.model.eval()
-
+        
     def predict(self, images, confidence_threshold=0.7):
         """
         Runs inference on a list of images.
