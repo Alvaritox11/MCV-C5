@@ -195,7 +195,7 @@ def main():
         
         if stats is not None:
             eval_metrics = {
-                "val/mAP_0.5_0.95": stats[0], "val/mAP_small": stats[3], "val/mAP_large": stats[5],
+                "val/mAP_0.5_0.95": stats[0], "val/mAP_small": stats[3], "val/mAP_medium": stats[4], "val/mAP_large": stats[5],
                 "val/mAP_Car": map_car, "val/mAP_Pedestrian": map_ped, "system/inference_fps": fps
             }
             wandb.log(eval_metrics)
@@ -224,6 +224,7 @@ def main():
                 "train/loss_bbox": loss_bbox,
                 "val/mAP_0.5_0.95": mAP,
                 "val/mAP_small": stats[3] if stats is not None else 0.0,
+                "val/mAP_medium": stats[4] if stats is not None else 0.0,
                 "val/mAP_large": stats[5] if stats is not None else 0.0,
                 "val/mAP_Car": map_car,
                 "val/mAP_Pedestrian": map_ped,

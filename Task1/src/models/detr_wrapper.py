@@ -82,13 +82,27 @@ class DetrWrapper:
 
         # 4. Standardization
         standardized_predictions = []
+        keep_classes = [1, 3] # COCO IDs for Person and Car
+        
         for result in processed_results:
-            # HuggingFace returns tensors on GPU; we move to CPU/List for the main script
-            # to be compatible with COCOEval/NumPy
+            boxes = result['boxes'].cpu().tolist()
+            scores = result['scores'].cpu().tolist()
+            labels = result['labels'].cpu().tolist()
+            
+            filtered_boxes, filtered_scores, filtered_labels = [], [], []
+            
+            # --- NEW: Filter out anything that isn't a Car or Person ---
+            for b, s, l in zip(boxes, scores, labels):
+                if l in keep_classes:
+                    filtered_boxes.append(b)
+                    filtered_scores.append(s)
+                    filtered_labels.append(l)
+            # -----------------------------------------------------------
+
             pred_dict = {
-                'boxes': result['boxes'].cpu().tolist(),
-                'scores': result['scores'].cpu().tolist(),
-                'labels': result['labels'].cpu().tolist()
+                'boxes': filtered_boxes,
+                'scores': filtered_scores,
+                'labels': filtered_labels
             }
             standardized_predictions.append(pred_dict)
 
