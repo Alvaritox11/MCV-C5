@@ -1,4 +1,6 @@
+import os
 import json
+import time
 import torch
 import wandb
 import argparse
@@ -30,8 +32,10 @@ def get_transforms(apply_aug, is_train):
 
 def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
     model_wrapper.model.train()
-    total_loss = 0.0
-    
+    total_loss, total_loss_ce, total_loss_bbox = 0.0, 0.0, 0.0
+
+    start_time = time.time()
+
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch} Training")
     for images, targets in progress_bar:
         optimizer.zero_grad()
@@ -51,6 +55,10 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
             
             loss_dict = model_wrapper.model(tensor_images, tensor_targets)
             losses = sum(loss for loss in loss_dict.values())
+            
+            # Extract separated losses for FRCNN
+            loss_ce = loss_dict.get('loss_classifier', torch.tensor(0.0)) + loss_dict.get('loss_objectness', torch.tensor(0.0))
+            loss_bbox = loss_dict.get('loss_box_reg', torch.tensor(0.0)) + loss_dict.get('loss_rpn_box_reg', torch.tensor(0.0))
             
         # ---------------------------------------------------------
         # DETR FORWARD PASS
@@ -83,6 +91,10 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
             outputs = model_wrapper.model(**inputs, labels=labels_list)
             losses = outputs.loss
             
+            # Extract separated losses for DETR
+            loss_ce = outputs.loss_dict.get('loss_ce', torch.tensor(0.0))
+            loss_bbox = outputs.loss_dict.get('loss_bbox', torch.tensor(0.0)) + outputs.loss_dict.get('loss_giou', torch.tensor(0.0))
+            
         else:
             raise ValueError("Unsupported model for manual training loop.")
 
@@ -96,10 +108,13 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
         optimizer.step()
         
         total_loss += losses.item()
+        total_loss_ce += loss_ce.item()
+        total_loss_bbox += loss_bbox.item()
         progress_bar.set_postfix(loss=losses.item())
-        wandb.log({"train/batch_loss": losses.item()})
-
-    return total_loss / len(dataloader)
+        # wandb.log({"train/batch_loss": losses.item()})
+    
+    epoch_time = time.time() - start_time
+    return total_loss / len(dataloader), total_loss_ce / len(dataloader), total_loss_bbox / len(dataloader), epoch_time
 
 @torch.inference_mode()
 def evaluate(model_wrapper, dataloader, dataset, config):
@@ -107,10 +122,17 @@ def evaluate(model_wrapper, dataloader, dataset, config):
         model_wrapper.model.eval()
         
     evaluator = CocoEvaluator(dataset)
+    total_images = 0
+    inference_time = 0.0
     
     for images, targets in tqdm(dataloader, desc="Evaluating"):
+        start_inf = time.time()
+        
         # All wrappers take a list of PIL images and output standardized dicts
         predictions = model_wrapper.predict(images, confidence_threshold=config['confidence_threshold'])
+        
+        inference_time += time.time() - start_inf
+        total_images += len(images)
         
         # Inject image_id so CocoEvaluator knows which image this belongs to
         for pred, target in zip(predictions, targets):
@@ -118,8 +140,9 @@ def evaluate(model_wrapper, dataloader, dataset, config):
             
         evaluator.update(predictions)
         
-    stats = evaluator.summarize()
-    return stats
+    fps = total_images / inference_time if inference_time > 0 else 0
+    stats, map_car, map_ped = evaluator.summarize()
+    return stats, map_car, map_ped, fps
 
 def main():
     parser = argparse.ArgumentParser(description="C5 Object Detection Pipeline")
@@ -128,6 +151,13 @@ def main():
     
     config = load_config(args.config)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Setup local results directory
+    results_dir = os.path.join("results", config["wandb_run_name"])
+    os.makedirs(results_dir, exist_ok=True)
+    metrics_file = os.path.join(results_dir, "metrics.json")
+    if not os.path.exists(metrics_file):
+        with open(metrics_file, 'w') as f: json.dump([], f)
     
     wandb.init(project=config["wandb_project"], entity=config['wandb_entity'], name=config["wandb_run_name"], config=config)
     print(f"--- Starting Pipeline | Mode: {config['mode'].upper()} | Model: {config['model_type']} ---")
@@ -151,19 +181,27 @@ def main():
         wrapper = YoloWrapper(device=device)
     else:
         raise ValueError("Invalid model_type in config.")
+    
+    # Calculate system metrics
+    trainable_params = sum(p.numel() for p in wrapper.model.parameters() if p.requires_grad) if hasattr(wrapper, 'model') else 0
+    print(f"Trainable Parameters: {trainable_params:,}")
+
+    best_map = 0.0
 
     # 3. Execution based on Mode
     if config["mode"] == "evaluate":
-        # TASKS C & D: Evaluate pre-trained models
         print("Evaluating pre-trained model...")
-        val_stats = evaluate(wrapper, val_loader, val_dataset, config)
+        stats, map_car, map_ped, fps = evaluate(wrapper, val_loader, val_dataset, config)
         
-        mAP = val_stats[0] if val_stats is not None else 0.0
-        wandb.log({"val/mAP_0.5_0.95": mAP})
-        print(f"Evaluation Complete. mAP (0.5:0.95): {mAP:.4f}")
+        if stats is not None:
+            eval_metrics = {
+                "val/mAP_0.5_0.95": stats[0], "val/mAP_small": stats[3], "val/mAP_large": stats[5],
+                "val/mAP_Car": map_car, "val/mAP_Pedestrian": map_ped, "system/inference_fps": fps
+            }
+            wandb.log(eval_metrics)
+            with open(metrics_file, 'w') as f: json.dump([eval_metrics], f, indent=4)
         
     elif config["mode"] == "train":
-        # TASKS E & F: Fine-tune models
         if config["model_type"] == "yolo":
             raise RuntimeError("Train YOLO using Ultralytics CLI, not this script! Use this script only for YOLO evaluation.")
             
@@ -171,19 +209,43 @@ def main():
         optimizer = torch.optim.AdamW(params, lr=config["learning_rate"], weight_decay=config["weight_decay"])
 
         for epoch in range(1, config["epochs"] + 1):
-            avg_train_loss = train_one_epoch(wrapper, train_loader, optimizer, device, epoch)
+            avg_loss, loss_ce, loss_bbox, epoch_time = train_one_epoch(wrapper, train_loader, optimizer, device, epoch)
             
             print(f"Validating Epoch {epoch}...")
-            val_stats = evaluate(wrapper, val_loader, val_dataset, config)
-            mAP = val_stats[0] if val_stats is not None else 0.0
+            stats, map_car, map_ped, fps = evaluate(wrapper, val_loader, val_dataset, config)
+            mAP = stats[0] if stats is not None else 0.0
+            max_mem = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0.0
             
-            wandb.log({
+            # Combine all metrics into one dictionary
+            epoch_metrics = {
                 "epoch": epoch,
-                "train/epoch_loss": avg_train_loss,
-                "val/mAP_0.5_0.95": mAP
-            })
+                "train/total_loss": avg_loss,
+                "train/loss_ce": loss_ce,
+                "train/loss_bbox": loss_bbox,
+                "val/mAP_0.5_0.95": mAP,
+                "val/mAP_small": stats[3] if stats is not None else 0.0,
+                "val/mAP_large": stats[5] if stats is not None else 0.0,
+                "val/mAP_Car": map_car,
+                "val/mAP_Pedestrian": map_ped,
+                "system/epoch_time_sec": epoch_time,
+                "system/inference_fps": fps,
+                "system/max_gpu_mem_MB": max_mem,
+                "system/trainable_params": trainable_params
+            }
             
-            # Note: You can add code here to save model checkpoints (e.g., torch.save)
+            wandb.log(epoch_metrics)
+            
+            # Append to local JSON
+            with open(metrics_file, 'r') as f: all_metrics = json.load(f)
+            all_metrics.append(epoch_metrics)
+            with open(metrics_file, 'w') as f: json.dump(all_metrics, f, indent=4)
+            
+            # Checkpoint saving
+            if mAP > best_map:
+                best_map = mAP
+                checkpoint_path = os.path.join(results_dir, "best_model.pt")
+                torch.save(wrapper.model.state_dict(), checkpoint_path)
+                print(f"--> Saved new Best Model to {checkpoint_path} (mAP: {best_map:.4f})")
 
     wandb.finish()
 

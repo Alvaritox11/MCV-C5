@@ -2,6 +2,7 @@
 __pycache__
 logs/
 wandb/
+results/
 
 # Files
 *.txt
