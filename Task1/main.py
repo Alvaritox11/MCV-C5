@@ -20,14 +20,28 @@ def load_config(config_path="configs/detr_config.json"):
     with open(config_path, 'r') as f:
         return json.load(f)
 
-def get_transforms(apply_aug, is_train):
-    """Returns Albumentations transforms formatted for object detection."""
-    if is_train and apply_aug:
+def get_transforms(aug_type, is_train):
+    """Returns Albumentations transforms based on the requested strategy."""
+    # If eval mode, or aug_type is explicitly none/false, return no transforms
+    if not is_train or aug_type == "none" or aug_type is False:
+        return None
+
+    # Strategy 1: Basic Spatial and Lighting
+    if aug_type == "basic" or aug_type is True:
         return A.Compose([
             A.HorizontalFlip(p=0.5),
-            A.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
-            # Add more Albumentations here if needed
+            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.5),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+
+    # Strategy 2: Weather & Domain Robustness
+    elif aug_type == "weather":
+        return A.Compose([
+            A.HorizontalFlip(p=0.5),
+            A.RandomFog(p=0.3),                 # Simulates foggy dashcam footage
+            A.MotionBlur(blur_limit=5, p=0.3),  # Simulates camera shake/driving speed
+            A.ColorJitter(brightness=0.1, contrast=0.2, p=0.5)
+        ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+    
     return None
 
 def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
@@ -163,8 +177,8 @@ def main():
     print(f"--- Starting Pipeline | Mode: {config['mode'].upper()} | Model: {config['model_type']} ---")
 
     # 1. Dataset & DataLoader initialization
-    train_transforms = get_transforms(config["apply_augmentations"], is_train=True)
-    val_transforms = get_transforms(config["apply_augmentations"], is_train=False)
+    train_transforms = get_transforms(config.get("apply_augmentations", "none"), is_train=True)
+    val_transforms = get_transforms("none", is_train=False) 
 
     train_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="train", transforms=train_transforms)
     val_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="val", transforms=val_transforms)
