@@ -29,7 +29,9 @@ def get_transforms(aug_type, is_train):
     # Strategy 1: Basic Spatial and Lighting
     if aug_type == "basic" or aug_type is True:
         return A.Compose([
+            A.Perspective(p=0.1),
             A.HorizontalFlip(p=0.5),
+            A.Affine(scale=(0.8, 1.2), p=0.5),
             A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.5),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
@@ -38,7 +40,9 @@ def get_transforms(aug_type, is_train):
         return A.Compose([
             A.HorizontalFlip(p=0.5),
             A.RandomFog(p=0.3),                 # Simulates foggy dashcam footage
+            A.RandomRain(p=0.3),                               # Simulates rain
             A.MotionBlur(blur_limit=5, p=0.3),  # Simulates camera shake/driving speed
+            A.CoarseDropout(max_holes=8, max_height=64, max_width=64, p=0.5), # Occlusion
             A.ColorJitter(brightness=0.1, contrast=0.2, p=0.5)
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
     
@@ -162,19 +166,25 @@ def main():
     parser = argparse.ArgumentParser(description="C5 Object Detection Pipeline")
     parser.add_argument('--config', type=str, default='configs/detr_config.json', help='Path to your JSON configuration file')
     args = parser.parse_args()
+
+    torch.manual_seed(42)
     
     config = load_config(args.config)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    wandb_run = wandb.init(project=config["wandb_project"], entity=config['wandb_entity'], name=config["wandb_run_name"], config=config)
+    run_id = wandb_run.id if wandb_run is not None else str(int(time.time()))
     
-    # Setup local results directory
-    results_dir = os.path.join("results", config["wandb_run_name"])
+    # Setup local results directory appending the Run ID to avoid overwriting
+    folder_name = f"{config['wandb_run_name']}_{run_id}"
+    results_dir = os.path.join("results", folder_name)
     os.makedirs(results_dir, exist_ok=True)
     metrics_file = os.path.join(results_dir, "metrics.json")
     if not os.path.exists(metrics_file):
         with open(metrics_file, 'w') as f: json.dump([], f)
     
-    wandb.init(project=config["wandb_project"], entity=config['wandb_entity'], name=config["wandb_run_name"], config=config)
     print(f"--- Starting Pipeline | Mode: {config['mode'].upper()} | Model: {config['model_type']} ---")
+    print(f"--- Results will be saved locally to: {results_dir} ---")
 
     # 1. Dataset & DataLoader initialization
     train_transforms = get_transforms(config.get("apply_augmentations", "none"), is_train=True)

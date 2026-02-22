@@ -1,9 +1,10 @@
 import torch
 from transformers import DetrImageProcessor, DetrForObjectDetection
+from peft import LoraConfig, get_peft_model
 from PIL import Image
 
 class DetrWrapper:
-    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False):
+    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False, use_lora=False):
         """
         Initializes the DETR model and processor from HuggingFace.
         
@@ -21,15 +22,33 @@ class DetrWrapper:
         # Load the model with the correct head for object detection
         self.model = DetrForObjectDetection.from_pretrained(model_name)
         
-        # --- for the fine tune experiment ---
-        if freeze_base:
-            print("Freezing DETR base. Training heads only...")
+        # ResNet always freezed to ensure fair comparison across all experiments
+        print("Freezing ResNet Backbone...")
+        for name, param in self.model.named_parameters():
+            if "backbone" in name:
+                param.requires_grad = False
+
+        # Fine-tuning experiment configurations
+        if use_lora:
+            print("Applying LoRA to DETR Attention layers...")
+            lora_config = LoraConfig(
+                r=8, # Sweetspot, aovid memorize data 
+                lora_alpha=32, # alpha = 4 * r (common choice). Pay heavy attention to the new features without needing to add more params
+                target_modules=["q_proj", "v_proj"], # Target the attention matrices
+                modules_to_save=["class_labels_classifier", "bbox_predictor"], # " List of modules ... to be set as trainable" as well
+                bias="none" # ignore bias
+            )
+            self.model = get_peft_model(self.model, lora_config)
+            self.model.print_trainable_parameters()
+            
+        elif freeze_base:
+            print("Freezing DETR Transformer. Training heads only...")
             for name, param in self.model.named_parameters():
-                # Freeze everything EXCEPT the classification and bounding box heads
                 if "class_labels_classifier" not in name and "bbox_predictor" not in name:
                     param.requires_grad = False
-        # ------------------------------------------
-        
+                    
+        else:
+            print("Training full Transformer and Heads (ResNet remains frozen)...")
         
         self.model.to(self.device)
         self.model.eval()

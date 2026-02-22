@@ -8,6 +8,7 @@
     "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
     
     "freeze_base": false,
+    "use_lora": false,
     "batch_size": 4,
     "epochs": 0,
     "learning_rate": 0,
