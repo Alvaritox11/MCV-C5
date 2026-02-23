@@ -1,7 +1,7 @@
 {
     "wandb_entity": "Team5-C5",
     "wandb_project": "FRNN",
-    "wandb_run_name": "step1_frnn_head_baseline",
+    "wandb_run_name": "step2_frnn_augs_weather",
 
     "mode": "train", 
     "model_type": "faster_rcnn", 
@@ -14,5 +14,5 @@
     "learning_rate": 1e-4,
     "weight_decay": 1e-4,
     "confidence_threshold": 0.5,
-    "apply_augmentations": false
+    "apply_augmentations": "weather"
 }

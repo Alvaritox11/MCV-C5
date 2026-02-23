@@ -198,9 +198,10 @@ def main():
 
     # 2. Model Initialization
     if config["model_type"] == "faster_rcnn":
-        wrapper = FasterRCNNWrapper(device=device, freeze_base=config.get("freeze_base", False))
+        wrapper = FasterRCNNWrapper(device=device, freeze_base=config.get("freeze_base", False), use_partial_unfreeze=config.get("use_partial_unfreeze", False))
     elif config["model_type"] == "detr":
-        wrapper = DetrWrapper(device=device, freeze_base=config.get("freeze_base", False))
+        print("Debug: Se esta usando LoRA")
+        wrapper = DetrWrapper(device=device, freeze_base=config.get("freeze_base", False), use_lora=config.get("use_lora", False))
     elif config["model_type"] == "yolo":
         wrapper = YoloWrapper(device=device)
     else:
