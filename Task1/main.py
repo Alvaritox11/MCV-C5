@@ -143,11 +143,74 @@ def evaluate(model_wrapper, dataloader, dataset, config):
     total_images = 0
     inference_time = 0.0
     
+    # Variables for DETR Validation Loss
+    total_val_loss, total_val_loss_ce, total_val_loss_bbox = 0.0, 0.0, 0.0
+    
     for images, targets in tqdm(dataloader, desc="Evaluating"):
         start_inf = time.time()
-        
-        # All wrappers take a list of PIL images and output standardized dicts
-        predictions = model_wrapper.predict(images, confidence_threshold=config['confidence_threshold'])
+
+        # ---------------------------------------------------------
+        # DETR: One-Pass Validation (Loss + Predictions)
+        # ---------------------------------------------------------
+        if config["model_type"] == "detr" and hasattr(model_wrapper, 'processor'):
+            labels_list = []
+            target_sizes_list = []
+            
+            for tgt in targets:
+                h, w = tgt['orig_size']
+                target_sizes_list.append([h, w])
+                boxes = tgt['boxes']
+                
+                # Convert to normalized cxcywh
+                if len(boxes) > 0:
+                    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0 / w
+                    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0 / h
+                    bw = (boxes[:, 2] - boxes[:, 0]) / float(w)
+                    bh = (boxes[:, 3] - boxes[:, 1]) / float(h)
+                    norm_boxes = torch.stack([cx, cy, bw, bh], dim=1)
+                else:
+                    norm_boxes = torch.empty((0, 4), dtype=torch.float32)
+
+                labels_list.append({
+                    "class_labels": tgt['labels'].to(model_wrapper.device),
+                    "boxes": norm_boxes.to(model_wrapper.device)
+                })
+
+            inputs = model_wrapper.processor(images=list(images), return_tensors="pt")
+            inputs = {k: v.to(model_wrapper.device) for k, v in inputs.items()}
+            
+            # --- THE SINGLE FORWARD PASS ---
+            outputs = model_wrapper.model(**inputs, labels=labels_list)
+            
+            # 1. Extract Losses
+            total_val_loss += outputs.loss.item()
+            total_val_loss_ce += outputs.loss_dict.get('loss_ce', torch.tensor(0.0)).item()
+            total_val_loss_bbox += (outputs.loss_dict.get('loss_bbox', torch.tensor(0.0)).item() + 
+                                    outputs.loss_dict.get('loss_giou', torch.tensor(0.0)).item())
+            
+            # 2. Extract Predictions (Replicating the wrapper's logic safely)
+            target_sizes = torch.tensor(target_sizes_list).to(model_wrapper.device)
+            processed_results = model_wrapper.processor.post_process_object_detection(
+                outputs, target_sizes=target_sizes, threshold=config['confidence_threshold']
+            )
+            
+            predictions = []
+            keep_classes = [1, 3] # Person and Car
+            for result in processed_results:
+                b, s, l = result['boxes'].cpu().tolist(), result['scores'].cpu().tolist(), result['labels'].cpu().tolist()
+                filtered = {'boxes': [], 'scores': [], 'labels': []}
+                for box, score, label in zip(b, s, l):
+                    if label in keep_classes:
+                        filtered['boxes'].append(box)
+                        filtered['scores'].append(score)
+                        filtered['labels'].append(label)
+                predictions.append(filtered)
+
+        # ---------------------------------------------------------
+        # FASTER R-CNN: Standard prediction (No Loss)
+        # ---------------------------------------------------------
+        else:
+            predictions = model_wrapper.predict(images, confidence_threshold=config['confidence_threshold'])
         
         inference_time += time.time() - start_inf
         total_images += len(images)
@@ -160,7 +223,31 @@ def evaluate(model_wrapper, dataloader, dataset, config):
         
     fps = total_images / inference_time if inference_time > 0 else 0
     stats, map_car, map_ped = evaluator.summarize()
-    return stats, map_car, map_ped, fps
+    
+    # Average the DETR validation losses
+    avg_val_loss = total_val_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    avg_val_loss_ce = total_val_loss_ce / len(dataloader) if len(dataloader) > 0 else 0.0
+    avg_val_loss_bbox = total_val_loss_bbox / len(dataloader) if len(dataloader) > 0 else 0.0
+    
+    return stats, map_car, map_ped, fps, avg_val_loss, avg_val_loss_ce, avg_val_loss_bbox
+
+# Helper function to unpack all 12 COCO metrics safely
+def get_all_stats(stats, prefix):
+    if stats is None: return {}
+    return {
+        f"{prefix}/mAP_0.50_0.95_all": stats[0],
+        f"{prefix}/mAP_0.50_all": stats[1],
+        f"{prefix}/mAP_0.75_all": stats[2],
+        f"{prefix}/mAP_0.50_0.95_small": stats[3],
+        f"{prefix}/mAP_0.50_0.95_medium": stats[4],
+        f"{prefix}/mAP_0.50_0.95_large": stats[5],
+        f"{prefix}/Recall_max1_all": stats[6],
+        f"{prefix}/Recall_max10_all": stats[7],
+        f"{prefix}/Recall_max100_all": stats[8],
+        f"{prefix}/Recall_max100_small": stats[9],
+        f"{prefix}/Recall_max100_medium": stats[10],
+        f"{prefix}/Recall_max100_large": stats[11],
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="C5 Object Detection Pipeline")
@@ -200,7 +287,6 @@ def main():
     if config["model_type"] == "faster_rcnn":
         wrapper = FasterRCNNWrapper(device=device, freeze_base=config.get("freeze_base", False), use_partial_unfreeze=config.get("use_partial_unfreeze", False))
     elif config["model_type"] == "detr":
-        print("Debug: Se esta usando LoRA")
         wrapper = DetrWrapper(device=device, freeze_base=config.get("freeze_base", False), use_lora=config.get("use_lora", False))
     elif config["model_type"] == "yolo":
         wrapper = YoloWrapper(device=device)
@@ -216,16 +302,26 @@ def main():
     # 3. Execution based on Mode
     if config["mode"] == "evaluate":
         print("Evaluating pre-trained model...")
-        stats, map_car, map_ped, fps = evaluate(wrapper, val_loader, val_dataset, config)
+        stats, map_car, map_ped, fps, val_loss, val_loss_ce, val_loss_bbox = evaluate(wrapper, val_loader, val_dataset, config)
         
         if stats is not None:
             eval_metrics = {
-                "val/mAP_0.5_0.95": stats[0], "val/mAP_small": stats[3], "val/mAP_medium": stats[4], "val/mAP_large": stats[5],
-                "val/mAP_Car": map_car, "val/mAP_Pedestrian": map_ped, "system/inference_fps": fps
+                **get_all_stats(stats, "val"),
+                "val/mAP_Car": map_car, 
+                "val/mAP_Pedestrian": map_ped, 
+                "system/inference_fps": fps
             }
+            
+            # FIX: Conditionally log DETR validation loss during step 0 evaluation
+            if config["model_type"] == "detr":
+                eval_metrics.update({
+                    "val/total_loss": val_loss,
+                    "val/loss_ce": val_loss_ce,
+                    "val/loss_bbox": val_loss_bbox
+                })
+                
             wandb.log(eval_metrics)
             with open(metrics_file, 'w') as f: json.dump([eval_metrics], f, indent=4)
-        
     elif config["mode"] == "train":
         if config["model_type"] == "yolo":
             raise RuntimeError("Train YOLO using Ultralytics CLI, not this script! Use this script only for YOLO evaluation.")
@@ -236,9 +332,13 @@ def main():
         for epoch in range(1, config["epochs"] + 1):
             avg_loss, loss_ce, loss_bbox, epoch_time = train_one_epoch(wrapper, train_loader, optimizer, device, epoch)
             
+            print(f"Evaluating Training Set Epoch {epoch}...")
+            train_stats, train_map_car, train_map_ped, _, _, _, _ = evaluate(wrapper, train_loader, train_dataset, config)
+
             print(f"Validating Epoch {epoch}...")
-            stats, map_car, map_ped, fps = evaluate(wrapper, val_loader, val_dataset, config)
-            mAP = stats[0] if stats is not None else 0.0
+            val_stats, val_map_car, val_map_ped, fps, val_loss, val_loss_ce, val_loss_bbox = evaluate(wrapper, val_loader, val_dataset, config)
+
+            val_mAP = val_stats[0] if val_stats is not None else 0.0
             max_mem = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0.0
             
             # Combine all metrics into one dictionary
@@ -247,17 +347,37 @@ def main():
                 "train/total_loss": avg_loss,
                 "train/loss_ce": loss_ce,
                 "train/loss_bbox": loss_bbox,
-                "val/mAP_0.5_0.95": mAP,
-                "val/mAP_small": stats[3] if stats is not None else 0.0,
-                "val/mAP_medium": stats[4] if stats is not None else 0.0,
-                "val/mAP_large": stats[5] if stats is not None else 0.0,
-                "val/mAP_Car": map_car,
-                "val/mAP_Pedestrian": map_ped,
+
+                **get_all_stats(train_stats, "train"),
+                # "train/mAP_0.5_0.95": train_mAP,
+                # "train/mAP_0.5": train_stats[1] if train_stats is not None else 0.0,     
+                # "train/Recall_AR100": train_stats[8] if train_stats is not None else 0.0,
+                # "train/mAP_small": train_stats[3] if train_stats is not None else 0.0,
+                # "train/mAP_medium": train_stats[4] if train_stats is not None else 0.0,
+                # "train/mAP_large": train_stats[5] if train_stats is not None else 0.0,
+                "train/mAP_Car": train_map_car,
+                "train/mAP_Pedestrian": train_map_ped,
+
+                **get_all_stats(val_stats, "val"),
+                # "val/mAP_0.5_0.95": mAP,
+                # "val/mAP_small": stats[3] if stats is not None else 0.0,
+                # "val/mAP_medium": stats[4] if stats is not None else 0.0,
+                # "val/mAP_large": stats[5] if stats is not None else 0.0,
+                "val/mAP_Car": val_map_car,
+                "val/mAP_Pedestrian": val_map_ped,
+
                 "system/epoch_time_sec": epoch_time,
                 "system/inference_fps": fps,
                 "system/max_gpu_mem_MB": max_mem,
                 "system/trainable_params": trainable_params
             }
+
+            if config["model_type"] == "detr":
+                epoch_metrics.update({
+                    "val/total_loss": val_loss,
+                    "val/loss_ce": val_loss_ce,
+                    "val/loss_bbox": val_loss_bbox
+                })
             
             wandb.log(epoch_metrics)
             
@@ -267,8 +387,8 @@ def main():
             with open(metrics_file, 'w') as f: json.dump(all_metrics, f, indent=4)
             
             # Checkpoint saving
-            if mAP > best_map:
-                best_map = mAP
+            if val_mAP > best_map:
+                best_map = val_mAP
                 checkpoint_path = os.path.join(results_dir, "best_model.pt")
                 torch.save(wrapper.model.state_dict(), checkpoint_path)
                 print(f"--> Saved new Best Model to {checkpoint_path} (mAP: {best_map:.4f})")
