@@ -1,30 +1,20 @@
-
 {
-  "mode": "train_then_evaluate",
+  "mode": "train",
 
   "use_wandb": true,
   "wandb_entity": "Team5-C5",
   "wandb_project": "YOLO",
-  "wandb_run_name": "yolo_test_run_train_then_evaluate_mode",
+  "run_name": "yolo_v1",
 
   "yolo_model_path": "yolo26n.pt",
   "yolo_data_yaml": "/export/home/group05/KITTI-MOTS_YOLO/data.yaml",
 
   "data_dir": "/export/home/group05/mcv/datasets/C5/KITTI-MOTS",
 
-  "epochs": 3,
-  "imgsz": 256,
-  "batch_size": 8,
-  "yolo_device": 0,
-
-  "learning_rate": 0.001,
-  "weight_decay": 0.0005,
-
-  "confidence_threshold": 0.25,
-
+  "epochs": 5,
   "eval_split": "val",
-  "eval_batch_size": 8,
 
   "yolo_project": "runs",
-  "yolo_run_name": "yolo_test_ultra"
+  
+  "yolo_augmentation": "none"
 }

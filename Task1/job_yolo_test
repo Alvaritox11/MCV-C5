@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -n 8
 #SBATCH --mem 20000
-#SBATCH -p mhigh
+#SBATCH -p mlow
 #SBATCH -q masterhigh
 #SBATCH --gres gpu:1
 #SBATCH -o logs/yolo_smoke_%u_%j.out
