@@ -85,7 +85,7 @@ def transformations(aug_name: str):
             "erasing": 0.2,
             "auto_augment": "randaugment",  # adds stronger color/weather-like effects
         }
-
+    
     else:
         raise ValueError(f"Unknown augmentation: {aug_name}")
 
@@ -118,6 +118,9 @@ def main():
     model_path = cfg.get("yolo_model_path", "yolo26x.pt")
     wrapper = YoloWrapper(model_path=model_path, device=str(device))
 
+    for i, m in enumerate(wrapper.model.model.model):
+        print(f"layer {i}: {m.__class__.__name__}")
+
     # --- Dataset for CocoEvaluator eval ---
     # Only needed if you run mode=evaluate or train_then_evaluate
     def build_eval_loaders():
@@ -145,6 +148,7 @@ def main():
         name = cfg.get("run_name", "run_name_undefined")
 
         
+        freeze = int(cfg.get("freeze", 0))
         aug_args  = transformations(cfg.get("yolo_augmentation", "none"))
         # IMPORTANT: workers should not exceed Slurm cores. Set in config accordingly.
         results = wrapper.model.train(
@@ -160,6 +164,7 @@ def main():
             name=name,
             pretrained=True,
             save = True,
+            freeze=freeze,
             **aug_args
         )
 
