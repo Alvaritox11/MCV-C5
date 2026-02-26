@@ -1,7 +1,7 @@
 import torch
 import torchvision
 from torchvision.transforms import functional as F
-
+import numpy as np
 
 class FasterRCNNWrapper:
     def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3), freeze_base=False, use_partial_unfreeze=False):
@@ -66,6 +66,8 @@ class FasterRCNNWrapper:
         for img in images:
             if hasattr(img, "mode"):  # PIL.Image
                 img_t = F.to_tensor(img)  # float32 [0,1] CHW
+            elif isinstance(img, np.ndarray):
+                img_t = F.to_tensor(img)  # F.to_tensor natively converts HWC numpy to CHW tensor!
             elif torch.is_tensor(img):
                 img_t = img
                 if img_t.dtype != torch.float32:
