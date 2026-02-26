@@ -96,7 +96,7 @@ class CocoEvaluator:
         
         if not self.results:
             print("No predictions found!")
-            return
+            return None, 0.0, 0.0
 
         # Convert our "Standard format" (xyxy) to COCO format (xywh)
         coco_results = []
@@ -117,8 +117,8 @@ class CocoEvaluator:
                 })
 
         if not coco_results:
-             print("No valid predictions to evaluate.")
-             return
+            print("No valid predictions to evaluate.")
+            return None, 0.0, 0.0
 
         # Load results into COCO API
         coco_dt = self.coco_gt.loadRes(coco_results)
@@ -128,4 +128,21 @@ class CocoEvaluator:
         coco_eval.evaluate()
         coco_eval.accumulate()
         coco_eval.summarize()
-        return coco_eval.stats 
+        
+        # Extract Class-Specific mAP 
+        map_pedestrian = 0.0
+        map_car = 0.0
+        cat_ids = coco_eval.params.catIds
+        
+        # 'precision' shape is [T, R, K, A, M] -> K is category index
+        if 1 in cat_ids: # COCO Person
+            idx = cat_ids.index(1)
+            s = coco_eval.eval['precision'][:, :, idx, 0, 2]
+            if len(s[s > -1]) > 0: map_pedestrian = np.mean(s[s > -1])
+                
+        if 3 in cat_ids: # COCO Car
+            idx = cat_ids.index(3)
+            s = coco_eval.eval['precision'][:, :, idx, 0, 2]
+            if len(s[s > -1]) > 0: map_car = np.mean(s[s > -1])
+            
+        return coco_eval.stats, map_car, map_pedestrian

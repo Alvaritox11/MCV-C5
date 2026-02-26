@@ -4,7 +4,7 @@ from torchvision.transforms import functional as F
 
 
 class FasterRCNNWrapper:
-    def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3), freeze_base=False): # Freeze base experiment
+    def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3), freeze_base=False, use_partial_unfreeze=False):
         """
         TorchVision Faster R-CNN wrapper using the COCO head (91 classes).
 
@@ -18,14 +18,27 @@ class FasterRCNNWrapper:
         # Load pretrained model WITH COCO head (do not replace predictor)
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights)
         
-        # --- For the experiment fine-tune. i hope it works ---
-        if freeze_base:
-            print("Freezing Faster R-CNN base. Training head only...")
+        if use_partial_unfreeze:
+            print("Partial Unfreeze: Freezing ResNet layers 1-3. Training layer4, FPN, RPN, and RoI Heads...")
+            for name, param in self.model.named_parameters():
+                # Freeze the early layers of the backbone
+                if any(x in name for x in ["backbone.body.conv1", "backbone.body.bn1", 
+                                           "backbone.body.layer1", "backbone.body.layer2", 
+                                           "backbone.body.layer3"]):
+                    param.requires_grad = False
+                else:
+                    # Explicitly unfreeze layer4, fpn, rpn, and roi_heads
+                    param.requires_grad = True
+        elif freeze_base:
+            print("Freezing Faster R-CNN base. Training RoI box predictor head only...")
             for name, param in self.model.named_parameters():
                 # Freeze everything EXCEPT the final predictor head
                 if "roi_heads.box_predictor" not in name:
                     param.requires_grad = False
-        # ------------------------------------------
+        else:
+            print("Full Fine-Tune: Training entire Faster R-CNN (Backbone, RPN, RoI Heads)...")
+            for param in self.model.parameters():
+                param.requires_grad = True
         
         self.model.to(self.device)
         self.model.eval()

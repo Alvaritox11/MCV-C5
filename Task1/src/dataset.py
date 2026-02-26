@@ -276,10 +276,10 @@ class KittiMotsDataset(Dataset):
                     pass
 
                 target["boxes"] = torch.as_tensor(new_boxes, dtype=torch.float32)
-                # # --- FIX: Ensure 2D shape if augmentation removed all boxes ---
-                # if target["boxes"].numel() == 0:
-                #     target["boxes"] = torch.empty((0, 4), dtype=torch.float32)
-                # # --------------------------------------------------------------
+                # --- FIX: Ensure 2D shape if augmentation removed all boxes --- PARCHE
+                if target["boxes"].numel() == 0:
+                    target["boxes"] = torch.empty((0, 4), dtype=torch.float32)
+                # --------------------------------------------------------------
                 target["labels"] = torch.as_tensor(new_labels, dtype=torch.int64)
 
                 # Update size fields if image is numpy/torch with known shape
