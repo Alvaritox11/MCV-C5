@@ -13,7 +13,7 @@ from src.metrics import CocoEvaluator
 from src.models.frnn_wrapper import FasterRCNNWrapper
 from src.models.detr_wrapper import DetrWrapper
 from src.models.yolo_wrapper import YoloWrapper
-
+from src.models.rt_detr_wrapper import Rt_DetrWrapper
 def load_config(config_path="configs/detr_config.json"):
     with open(config_path, 'r') as f:
         return json.load(f)
@@ -55,7 +55,7 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
         # ---------------------------------------------------------
         # DETR FORWARD PASS
         # ---------------------------------------------------------
-        elif isinstance(model_wrapper, DetrWrapper):
+        elif isinstance(model_wrapper, DetrWrapper) or isinstance(model_wrapper, Rt_DetrWrapper):
             labels_list = []
             for tgt in targets:
                 h, w = tgt['orig_size']
@@ -82,7 +82,7 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
             
             outputs = model_wrapper.model(**inputs, labels=labels_list)
             losses = outputs.loss
-            
+        
         else:
             raise ValueError("Unsupported model for manual training loop.")
 
@@ -149,6 +149,9 @@ def main():
         wrapper = DetrWrapper(device=device, freeze_base=config.get("freeze_base", False))
     elif config["model_type"] == "yolo":
         wrapper = YoloWrapper(device=device)
+    elif config["model_type"] == "rt_detr":
+        print('aaaa')
+        wrapper = Rt_DetrWrapper(device=device, freeze_base=config.get("freeze_base", False))
     else:
         raise ValueError("Invalid model_type in config.")
 
