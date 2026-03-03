@@ -1,19 +1,21 @@
 {
     "wandb_entity": "Team5-C5",
-    "wandb_project": "DETR",
-    "wandb_run_name": "step3_detr_full_finetune_lora_30",
+    "wandb_project": "DETR_DeART",
+    "wandb_run_name": "DETR_lora",
 
     "mode": "train", 
     "model_type": "detr", 
-    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    "data_dir": "/ghome/group05/c5_data/",
     
     "freeze_base": false,
     "use_lora": true,
     "batch_size": 16, 
-    "epochs": 30,
+    "epochs": 5,
     "learning_rate": 1e-5, 
     "weight_decay": 1e-4,
     "confidence_threshold": 0.5,
-    "apply_augmentations": "basic" 
+    "apply_augmentations": "basic", 
+    "lora_r": 8,
+    "lora_alpha": 64
 }
 

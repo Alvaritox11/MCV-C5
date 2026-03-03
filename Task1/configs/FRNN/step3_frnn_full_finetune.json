@@ -10,8 +10,8 @@
     "freeze_base": false,
     "use_partial_unfreeze": false,
     "batch_size": 16,
-    "epochs": 30,
-    "learning_rate": 1e-4,
+    "epochs": 20,
+    "learning_rate": 1e-5,
     "weight_decay": 1e-4,
     "confidence_threshold": 0.5,
     "apply_augmentations": false

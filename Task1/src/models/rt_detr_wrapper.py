@@ -3,8 +3,8 @@ from transformers import DetrImageProcessor, DetrForObjectDetection
 from peft import LoraConfig, get_peft_model
 from PIL import Image
 
-class DetrWrapper:
-    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False, use_lora=False, lora_r=8, lora_alpha=32):
+class Rt_DetrWrapper:
+    def __init__(self, model_name="PekingU/rtdetr_r50vd", device=None, freeze_base=False):
         """
         Initializes the DETR model and processor from HuggingFace.
         
@@ -18,37 +18,28 @@ class DetrWrapper:
         print(f"Loading DETR model: {model_name} on {self.device}...")
         
         # Load the processor (handles resizing, normalization specific to DETR)
-        self.processor = DetrImageProcessor.from_pretrained(model_name)
-        # Load the model with the correct head for object detection
-        self.model = DetrForObjectDetection.from_pretrained(model_name)
+        self.processor = RTDetrImageProcessor.from_pretrained(model_name)
+        self.model = RTDetrForObjectDetection.from_pretrained(model_name)
         
-        # ResNet always freezed to ensure fair comparison across all experiments
-        print("Freezing ResNet Backbone...")
-        for name, param in self.model.named_parameters():
-            if "backbone" in name:
-                param.requires_grad = False
-
-        # Fine-tuning experiment configurations
+        # --- for the fine tune experiment ---
         if use_lora:
-            print("Applying LoRA to DETR Attention layers...")
+            print(f"Applying LoRA (r={lora_r}, alpha={lora_alpha}) to RT-DETR Attention layers...")
             lora_config = LoraConfig(
-                r=lora_r, # Sweetspot, aovid memorize data 
-                lora_alpha=lora_alpha, # alpha = 4 * r (common choice). Pay heavy attention to the new features without needing to add more params
-                target_modules=["q_proj", "v_proj"], # Target the attention matrices
-                modules_to_save=["class_labels_classifier", "bbox_predictor"], # " List of modules ... to be set as trainable" as well
-                bias="none" # ignore bias
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                target_modules=["q_proj", "v_proj"], # RT-DETR also uses standard Q/V attention projections
+                modules_to_save=["class_labels_classifier", "bbox_predictor"],
+                bias="none"
             )
             self.model = get_peft_model(self.model, lora_config)
             self.model.print_trainable_parameters()
             
         elif freeze_base:
-            print("Freezing DETR Transformer. Training heads only...")
+            print("Freezing RT-DETR base. Training heads only...")
             for name, param in self.model.named_parameters():
                 if "class_labels_classifier" not in name and "bbox_predictor" not in name:
                     param.requires_grad = False
-                    
-        else:
-            print("Training full Transformer and Heads (ResNet remains frozen)...")
+        # ------------------------------------------
         
         self.model.to(self.device)
         self.model.eval()
@@ -101,27 +92,13 @@ class DetrWrapper:
 
         # 4. Standardization
         standardized_predictions = []
-        keep_classes = [1, 3] # COCO IDs for Person and Car
-        
         for result in processed_results:
-            boxes = result['boxes'].cpu().tolist()
-            scores = result['scores'].cpu().tolist()
-            labels = result['labels'].cpu().tolist()
-            
-            filtered_boxes, filtered_scores, filtered_labels = [], [], []
-            
-            # --- NEW: Filter out anything that isn't a Car or Person ---
-            for b, s, l in zip(boxes, scores, labels):
-                if l in keep_classes:
-                    filtered_boxes.append(b)
-                    filtered_scores.append(s)
-                    filtered_labels.append(l)
-            # -----------------------------------------------------------
-
+            # HuggingFace returns tensors on GPU; we move to CPU/List for the main script
+            # to be compatible with COCOEval/NumPy
             pred_dict = {
-                'boxes': filtered_boxes,
-                'scores': filtered_scores,
-                'labels': filtered_labels
+                'boxes': result['boxes'].cpu().tolist(),
+                'scores': result['scores'].cpu().tolist(),
+                'labels': result['labels'].cpu().tolist()
             }
             standardized_predictions.append(pred_dict)
 

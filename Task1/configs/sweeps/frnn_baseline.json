@@ -1,17 +1,15 @@
 {
     "wandb_entity": "Team5-C5",
-    "wandb_project": "DETR",
-    "wandb_run_name": "detr_finetune_head",
+    "wandb_project": "FRNN",
 
     "mode": "train", 
-    "model_type": "detr", 
+    "model_type": "faster_rcnn", 
     "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
-
+    
     "freeze_base": true,
-    "batch_size": 4, 
-    "epochs": 2,
-    "learning_rate": 1e-4,
-    "weight_decay": 1e-4,
+    "use_partial_unfreeze": false,
+    "batch_size": 16,
+    "epochs": 15,
     "confidence_threshold": 0.5,
     "apply_augmentations": false
 }

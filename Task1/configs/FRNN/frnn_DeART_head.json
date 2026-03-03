@@ -1,18 +1,18 @@
 {
     "wandb_entity": "Team5-C5",
-    "wandb_project": "FRNN",
-    "wandb_run_name": "step1_frnn_head_baseline",
+    "wandb_project": "FRNN_DeART",
+    "wandb_run_name": "FRNN_head",
 
     "mode": "train", 
     "model_type": "faster_rcnn", 
-    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    "data_dir": "/ghome/group05/c5_data/",
     
     "freeze_base": true,
     "use_partial_unfreeze": false,
     "batch_size": 16,
-    "epochs": 15,
-    "learning_rate": 1e-5,
-    "weight_decay": 1e-4,
+    "epochs": 5,
+    "learning_rate": 1.5e-4,
+    "weight_decay": 6.7e-4,
     "confidence_threshold": 0.5,
     "apply_augmentations": false
 }
