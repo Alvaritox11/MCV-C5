@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH -n 8
+#SBATCH --mem 20000
+#SBATCH -p mlow
+#SBATCH -q masterhigh
+#SBATCH --gres gpu:1
+#SBATCH -o logs/yolo_smoke_%u_%j.out
+#SBATCH -e logs/yolo_smoke_%u_%j.err
+
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="Team5-C5"
+export WANDB_PROJECT="YOLO"
+
+python main_yolo.py --config configs/yolo_config_unfreezed.json
