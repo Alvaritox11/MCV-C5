@@ -3,6 +3,7 @@ import json
 import argparse
 from pathlib import Path
 import time
+import albumentations as A
 
 import torch
 import wandb
@@ -46,48 +47,40 @@ def evaluate_coco(model_wrapper, dataloader, dataset, confidence_threshold: floa
 
     return stats, map_car, map_ped, fps
 
-def transformations(aug_name: str):
+def transformations(aug_name: str, albumentation: bool = False):
+    if albumentation:
+        if aug_name == "none":
+            return []  # important: empty list for Ultralytics augmentations=
+        if aug_name == "basic":
+            return [
+                A.Perspective(p=0.1),
+                A.HorizontalFlip(p=0.5),
+                A.Affine(scale=(0.8, 1.2), p=0.5),
+                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.5),
+            ]
+        if aug_name == "weather":
+            return [
+                A.HorizontalFlip(p=0.5),
+                A.RandomFog(p=0.3),
+                A.RandomRain(p=0.3),
+                A.MotionBlur(blur_limit=5, p=0.3),
+                A.CoarseDropout(max_holes=8, max_height=64, max_width=64, p=0.5),
+                A.ColorJitter(brightness=0.1, contrast=0.2, p=0.5),
+            ]
+        raise ValueError(f"Unknown albumentations augmentation: {aug_name}")
+
+    # not albumentation: Ultralytics kwargs
     if aug_name == "none":
-        return {
-            "hsv_h": 0.0,
-            "hsv_s": 0.0,
-            "hsv_v": 0.0,
-            "translate": 0.0,
-            "scale": 0.0,
-            "fliplr": 0.0,
-            "mosaic": 0.0,
-            "erasing": 0.0,
-            "auto_augment": None,
-        }
+        return dict(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0, translate=0.0, scale=0.0,
+                    fliplr=0.0, mosaic=0.0, erasing=0.0, auto_augment=None)
+    if aug_name == "simple":
+        return dict(hsv_h=0.015, hsv_s=0.7, hsv_v=0.4, translate=0.1, scale=0.5,
+                    fliplr=0.5, mosaic=0.0, erasing=0.0, auto_augment=None)
+    if aug_name == "strong":
+        return dict(hsv_h=0.02, hsv_s=0.8, hsv_v=0.6, translate=0.1, scale=0.5,
+                    fliplr=0.5, mosaic=0.5, erasing=0.2, auto_augment="randaugment")
 
-    elif aug_name == "simple":
-        return {
-            "hsv_h": 0.015,
-            "hsv_s": 0.7,
-            "hsv_v": 0.4,
-            "translate": 0.1,
-            "scale": 0.5,
-            "fliplr": 0.5,
-            "mosaic": 0.0,
-            "erasing": 0.0,
-            "auto_augment": None,
-        }
-
-    elif aug_name == "weather":
-        return {
-            "hsv_h": 0.02,
-            "hsv_s": 0.8,
-            "hsv_v": 0.6,
-            "translate": 0.1,
-            "scale": 0.5,
-            "fliplr": 0.5,
-            "mosaic": 0.5,
-            "erasing": 0.2,
-            "auto_augment": "randaugment",  # adds stronger color/weather-like effects
-        }
-    
-    else:
-        raise ValueError(f"Unknown augmentation: {aug_name}")
+    raise ValueError(f"Unknown Ultralytics augmentation: {aug_name}")
 
 def main():
     parser = argparse.ArgumentParser(description="C5 YOLO Pipeline (Ultralytics train + optional CocoEvaluator eval)")
@@ -149,25 +142,47 @@ def main():
 
         
         freeze = int(cfg.get("freeze", 0))
-        aug_args  = transformations(cfg.get("yolo_augmentation", "none"))
-        # IMPORTANT: workers should not exceed Slurm cores. Set in config accordingly.
-        results = wrapper.model.train(
-            data=yolo_data_yaml,
-            epochs=int(cfg.get("epochs", 50)),
-            imgsz=int(cfg.get("imgsz", 640)),
-            batch=int(cfg.get("batch_size", 16)),
-            device=cfg.get("yolo_device", 0),  # 0 or "0" or "cpu"
-            workers=int(cfg.get("workers", 8)),
-            lr0=float(cfg.get("learning_rate", 1e-2)),
-            weight_decay=float(cfg.get("weight_decay", 5e-4)),
-            project=project,
-            name=name,
-            pretrained=True,
-            save = True,
-            freeze=freeze,
-            **aug_args
-        )
+        use_albumentations = bool(cfg.get("albumentation", False))
+        aug_args = transformations(cfg.get("yolo_augmentation","none"), albumentation=use_albumentations)
+        
 
+        if not use_albumentations:
+        # IMPORTANT: workers should not exceed Slurm cores. Set in config accordingly.
+            results = wrapper.model.train(
+                data=yolo_data_yaml,
+                epochs=int(cfg.get("epochs", 50)),
+                imgsz=int(cfg.get("imgsz", 640)),
+                batch=int(cfg.get("batch_size", 16)),
+                device=cfg.get("yolo_device", 0),  # 0 or "0" or "cpu"
+                workers=int(cfg.get("workers", 8)),
+                lr0=float(cfg.get("learning_rate", 1e-2)),
+                weight_decay=float(cfg.get("weight_decay", 5e-4)),
+                cos_lr=bool(cfg.get("cos_lr", False)),
+                project=project,
+                name=name,
+                pretrained=True,
+                save = True,
+                freeze=freeze,
+                **aug_args
+            )
+        else:
+            results = wrapper.model.train(
+                data=yolo_data_yaml,
+                epochs=int(cfg.get("epochs", 50)),
+                imgsz=int(cfg.get("imgsz", 640)),
+                batch=int(cfg.get("batch_size", 16)),
+                device=cfg.get("yolo_device", 0),  # 0 or "0" or "cpu"
+                workers=int(cfg.get("workers", 8)),
+                lr0=float(cfg.get("learning_rate", 1e-2)),
+                weight_decay=float(cfg.get("weight_decay", 5e-4)),
+                cos_lr=bool(cfg.get("cos_lr", False)),
+                project=project,
+                name=name,
+                pretrained=True,
+                save = True,
+                freeze=freeze,
+                augmentations = aug_args
+            )
         # Get the actual save directory from Ultralytics
         save_dir = getattr(results, "save_dir", None)
         if save_dir is None:
@@ -187,17 +202,27 @@ def main():
     if mode in ("evaluate", "train_then_evaluate"):
         eval_dataset, eval_loader = build_eval_loaders()
 
-        stats = evaluate_coco(
+        stats, map_car, map_ped, fps = evaluate_coco(
             wrapper,
             eval_loader,
             eval_dataset,
             confidence_threshold=float(cfg.get("confidence_threshold", 0.25)),
         )
+
         mAP = float(stats[0]) if stats is not None else 0.0
         print(f"Evaluation Complete. mAP (0.5:0.95): {mAP:.4f}")
-
+        print(f"mAP Car: {map_car:.4f}, mAP Pedestrian: {map_ped:.4f}")
+        print(f"Inference FPS: {fps:.2f}")
+        print(f"mAP_0.50_all: {stats[1]:.4f}")
+        
         if use_wandb:
-            wandb.log({"val/mAP_0.5_0.95": mAP})
+            wandb.log({
+                "val/mAP_0.5_0.95": mAP,
+                "val/mAP_Car": float(map_car),
+                "val/mAP_Pedestrian": float(map_ped),
+                "system/inference_fps": float(fps),
+            })
+
 
     if use_wandb:
         wandb.finish()
