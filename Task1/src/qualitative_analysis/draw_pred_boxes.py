@@ -14,7 +14,10 @@ from src.models.frnn_wrapper import FasterRCNNWrapper
 from src.models.yolo_wrapper import YoloWrapper
 from torchvision.transforms import functional as F
 from transformers import DetrForObjectDetection, DetrImageProcessor
+from typing import List, Tuple
+import xml.etree.ElementTree as ET
 
+KITTI = True
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -66,18 +69,71 @@ def parse_txt_annotations(txt_path, original_frame_id):
                     })
         return annotations
 
+def parse_xml(xml_path: str, frame_id: int = 0) -> dict:
+    """
+    Parses a Pascal VOC XML file.
+    Returns same format as parse_txt_annotations: {frame_id: [{'bbox': [x,y,w,h], 'label': int}]}
+    """
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    annotations = {frame_id: []}
+
+    for obj in root.findall("object"):
+        name = obj.find("name").text
+        print(f"Found object: {name}")
+        if name != "person":
+            bndbox = obj.find("bndbox")
+            xmin = float(bndbox.find("xmin").text)
+            ymin = float(bndbox.find("ymin").text)
+            xmax = float(bndbox.find("xmax").text)
+            ymax = float(bndbox.find("ymax").text)
+            if xmax <= xmin or ymax <= ymin:
+                continue
+
+            # Convert xyxy -> xywh to match txt format
+            bbox = [xmin, ymin, xmax - xmin, ymax - ymin]
+
+            annotations[frame_id].append({
+                'bbox': bbox,  # xywh
+                'label': 1     # pedestrian/person = 2, matching KITTI-MOTS class_id
+            })
+        else:
+            bndbox = obj.find("bndbox")
+            xmin = float(bndbox.find("xmin").text)
+            ymin = float(bndbox.find("ymin").text)
+            xmax = float(bndbox.find("xmax").text)
+            ymax = float(bndbox.find("ymax").text)
+            if xmax <= xmin or ymax <= ymin:
+                continue
+
+            # Convert xyxy -> xywh to match txt format
+            bbox = [xmin, ymin, xmax - xmin, ymax - ymin]
+
+            annotations[frame_id].append({
+                'bbox': bbox,  # xywh
+                'label': 2     # pedestrian/person = 2, matching KITTI-MOTS class_id
+            })
+
+    return annotations
+
 def load_samples(images, data_root): #[0000/0000.png]
         samples = []
-        dataset_root = os.path.join(data_root, "training", "image_02")
-        label_dir = os.path.join(data_root, 'instances_txt')
+        if KITTI:
+            dataset_root = os.path.join(data_root, "training", "image_02")
+            label_dir = os.path.join(data_root, 'instances_txt')
+        else:
+            dataset_root = os.path.join(data_root, "images")
+            label_dir = os.path.join(data_root, 'annots_pub')
+
         for image in images:
             image = Path(image)
-            folder = image.parent.name
-            frame_id = int(image.stem)
 
-            anno_path = os.path.join(label_dir, f"{folder}.txt")
-            annos_by_frame = parse_txt_annotations(anno_path, frame_id)
-            samples.append(
+            if KITTI:
+                frame_id = int(image.stem)
+                folder = image.parent.name
+                anno_path = os.path.join(label_dir, f"{folder}.txt")
+                annos_by_frame = parse_txt_annotations(anno_path, frame_id)
+                samples.append(
                     {
                         "path": os.path.join(dataset_root, image),
                         "seq": str(folder),
@@ -85,31 +141,42 @@ def load_samples(images, data_root): #[0000/0000.png]
                         "annos": annos_by_frame.get(frame_id,[])
                     }
                 )
+            else:
+                frame_id = image.stem
+                anno_path = os.path.join(label_dir, f"{frame_id}.xml")
+                annos_by_frame = parse_xml(anno_path, frame_id)
+                print('annos by', annos_by_frame)
+                samples.append(
+                    {
+                        "path": os.path.join(dataset_root, image),
+                        "seq": str(frame_id),
+                        "frame_id": int(frame_id),
+                        "annos": annos_by_frame.get(frame_id,[])
+                    }
+                )
         return samples
 
-def get_model(args):
-    if args.model == 'detr':
-        if args.checkpoint_path:
-            return DetrWrapper(model_name=args.checkpoint_path, device=args.device)
+def get_model(model_type, device, checkpoint_path):
+    if 'detr' in model_type:
+        if checkpoint_path:
+            return DetrWrapper(device=device, checkpoint_path=checkpoint_path)
         else:
-            return DetrWrapper(device=args.device)
-
-    elif args.model == 'yolo':
-        if args.checkpoint_path:
-            return YoloWrapper(device=args.device, model_path=args.checkpoint_path)
+            return DetrWrapper(device=device)
+    elif 'yolo' in model_type:
+        if checkpoint_path:
+            return YoloWrapper(device=device, model_path=checkpoint_path)
         else:
-            return YoloWrapper(device=args.device,)
-
-    elif args.model == 'fasterrcnn':
-        if args.checkpoint_path:
-            return FasterRCNNWrapper(device=args.device, checkpoint_path=args.checkpoint_path)
+            return YoloWrapper(device=device,)
+    elif 'fasterrcnn' in model_type:
+        if checkpoint_path:
+            return FasterRCNNWrapper(device=device, checkpoint_path=checkpoint_path)
         else:
-            return FasterRCNNWrapper(device=args.device)
+            return FasterRCNNWrapper(device=device)
 
     else:
-        raise ValueError(f"Unknown model type: {args.model}")
+        raise ValueError(f"Unknown model type: {model_type}")
 
-def standerize_output(outputs, confidence_threshold = 0.7):
+def standerize_output(outputs, confidence_threshold = 0.9):
     keep_classes=(1, 3)
     keep_classes = tuple(keep_classes)
     keep_classes_t = torch.tensor(keep_classes, dtype=torch.int64)
@@ -182,7 +249,7 @@ def box_iou_xyxy(a, b):
 
 def save_boxes_on_image(pred, gt, save_path,
                         score_thr=None, class_names=None,
-                        iou_thr=0.5):
+                        iou_thr=0.7):
     img_path = Path(gt['image_path'])
     img = Image.open(img_path).convert("RGB")
     filename = img_path.name
@@ -223,6 +290,7 @@ def save_boxes_on_image(pred, gt, save_path,
         for p in range(len(pred_boxes)):
             for g in range(len(gt_boxes)):
                 if pred_labels[p] == gt_labels[g] and iou[p, g] >= iou_thr:
+                    print(pred_labels[p], gt_labels[g])
                     cand.append((p, g, float(iou[p, g])))
 
         # sort best IoU first
@@ -297,46 +365,56 @@ def save_boxes_on_image(pred, gt, save_path,
 
 
 
-args = get_args()
-samples = load_samples(args.images_paths, args.data_root)
-class_map = {
-            1: 3,  # Car -> Car
-            2: 1   # Pedestrian -> Person
+def draw_pred_boxes(images_paths, model_type, device, checkpoint_path, output_path):
+    
+    if KITTI:
+        data_root = "/home/mcv/datasets/C5/KITTI-MOTS/"
+    else:
+        data_root = "/ghome/group05/c5_data"
+    samples = load_samples(images_paths, data_root)
+    if KITTI:
+        class_map = {
+                    1: 3,  
+                    2: 1   
+                }
+    else:
+        class_map = {
+                    1: 3,  
+                    2:  1  
+                }
+    targets = []
+    images = []
+    print(samples, 'Samples')
+    for i,sample in enumerate(samples):
+        image_path = sample['path']
+        image = Image.open(sample['path']).convert("RGB") 
+        w, h = image.size
+        images.append(image)
+
+        boxes = []
+        labels = []
+
+        for anno in sample['annos']:
+                # Convert xywh to xyxy for standard detection format
+                print(anno['bbox'])
+                x, y, w_box, h_box = anno['bbox']
+                boxes.append([x, y, x + w_box, y + h_box])
+                
+                labels.append(class_map.get(anno['label']))
+
+        target = {
+            'boxes': torch.as_tensor(boxes, dtype=torch.float32),
+            'labels': torch.as_tensor(labels, dtype=torch.int64),
+            'image_id': torch.tensor(int(Path(image_path).stem)),
+            'orig_size': torch.as_tensor([h, w]),
+            'seq': sample['seq'], 
+            'image_path': image_path
         }
+        targets.append(target)
 
-targets = []
-images = []
-for i,sample in enumerate(samples):
-    image_path = sample['path']
-    image = Image.open(sample['path']).convert("RGB") 
-    w, h = image.size
-    images.append(image)
+    model = get_model(model_type, device, checkpoint_path)
 
-    boxes = []
-    labels = []
-
-    for anno in sample['annos']:
-            # Convert xywh to xyxy for standard detection format
-            print(anno['bbox'])
-            x, y, w_box, h_box = anno['bbox']
-            boxes.append([x, y, x + w_box, y + h_box])
-            
-            # Map KITTI label to COCO label [cite: 448]
-            labels.append(class_map.get(anno['label']))
-
-    target = {
-        'boxes': torch.as_tensor(boxes, dtype=torch.float32),
-        'labels': torch.as_tensor(labels, dtype=torch.int64),
-        'image_id': torch.tensor(int(Path(image_path).stem)),
-        'orig_size': torch.as_tensor([h, w]),
-        'seq': sample['seq'], # Helpful for debugging
-        'image_path': image_path
-    }
-    targets.append(target)
-
-model = get_model(args)
-
-outputs = model.predict(images)
-standerized = standerize_output(outputs)
-for pred, target in zip(standerized, targets):
-    save_boxes_on_image(pred, target, f'/home/group05/maiol/MCV-C5/outs/{args.model}')
+    outputs = model.predict(images)
+    standerized = standerize_output(outputs)
+    for pred, target in zip(standerized, targets):
+        save_boxes_on_image(pred, target, output_path)

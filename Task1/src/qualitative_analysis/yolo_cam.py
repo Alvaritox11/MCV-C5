@@ -9,13 +9,12 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.transforms.functional import to_tensor
 from ultralytics import YOLO
 
-model = YOLO("yolo26x.pt")
-samples = ["0000/000000.png"]
-dataset_root = os.path.join('/home/mcv/datasets/C5/KITTI-MOTS/', "training", "image_02")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-project = "/home/group05/maiol/MCV-C5/Task1/YOLO"
-for i,sample in enumerate(samples):
-    print("Image", i)
+def yolo_cam(sample, model_path, device, project_path):
+
+    model = YOLO(model_path)
+
+    dataset_root = os.path.join('/home/mcv/datasets/C5/KITTI-MOTS/', "training", "image_02")
+
     image_path = os.path.join(dataset_root, sample)
     image = Image.open(image_path).convert("RGB") 
     results = model.predict(
@@ -27,5 +26,5 @@ for i,sample in enumerate(samples):
             verbose=False,
             visualize = True,
             save = True,
-            project = project
+            project = project_path
         )

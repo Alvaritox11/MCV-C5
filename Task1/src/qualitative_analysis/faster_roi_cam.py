@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.transforms.functional import to_tensor
-
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 class FasterRCNNROICAM:
     def __init__(self, model):
@@ -153,29 +153,31 @@ def save_gradcam_overlay(image_tensor, cam, out_path, alpha=0.45):
 
         Image.fromarray(overlay).save(out_path)
 
-ckpt = torch.load(
-    "/home/group05/maiol/MCV-C5/Task1/best_model.pt",
-    map_location="cpu",
-    weights_only=True
-)     
-model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
 
-# If you trained with custom num_classes, set the predictor BEFORE loading
-# (see the helper below to infer it automatically)
-# model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+def faster_cam_roi(sample, output_path, model_path=None, class_id = 1):
+    if model_path is None:
+        model = fasterrcnn_resnet50_fpn(weights="DEFAULT")
+    else:
+        ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
+        state = ckpt.get("state_dict", ckpt)
 
-missing, unexpected = model.load_state_dict(ckpt, strict=True)
-model = model.cuda().eval()
-cam_extractor = FasterRCNNROICAM(model)
-# image: PIL -> tensor
-# image_tensor = to_tensor(pil_image)  # [0,1], shape (3,H,W)
-samples = ["0000/000000.png", "0001/000003.png"]
-dataset_root = os.path.join('/home/mcv/datasets/C5/KITTI-MOTS/', "training", "image_02")
-for i,sample in enumerate(samples):
-    print("Image", i)
+        # Infer num_classes from checkpoint
+        num_classes = state["roi_heads.box_predictor.cls_score.weight"].shape[0]
+        in_features = state["roi_heads.box_predictor.cls_score.weight"].shape[1]
+
+        model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
+        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+
+        missing, unexpected = model.load_state_dict(state, strict=True)
+        print(f"Loaded checkpoint: {len(missing)} missing, {len(unexpected)} unexpected keys")
+    model = model.cuda().eval()
+    cam_extractor = FasterRCNNROICAM(model)
+
+    dataset_root = os.path.join('/home/mcv/datasets/C5/KITTI-MOTS/', "training", "image_02")
+
     image_path = os.path.join(dataset_root, sample)
     image = Image.open(image_path).convert("RGB") 
     image_tensor = to_tensor(image)
-    cam, info = cam_extractor(image_tensor, target_label=3, score_thresh=0.7, keep_first=True)
-    save_gradcam_overlay(image_tensor, cam, f"roi_gradcam_overlay_{i}.png")
+    cam, info = cam_extractor(image_tensor, target_label=class_id, score_thresh=0.7, keep_first=True)
+    save_gradcam_overlay(image_tensor, cam, os.path.join(output_path, "grad_cam_roi.png"))
     print(info["scores"][:5], info["boxes"][:1])
