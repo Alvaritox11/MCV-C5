@@ -1,22 +1,46 @@
 import torch
 import torchvision
 from torchvision.transforms import functional as F
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 import numpy as np
 
 class FasterRCNNWrapper:
+    # ffor qualitative analysis the comented one
+    # def __init__(self, device: str | None = None, weights: str | None = "DEFAULT", keep_classes=(1, 3), checkpoint_path: str | None = None, map_location: str | None = "cpu"):
     def __init__(self, device: str | None = None, weights: str = "DEFAULT", keep_classes=(1, 3), freeze_base=False, use_partial_unfreeze=False):
         """
-        TorchVision Faster R-CNN wrapper using the COCO head (91 classes).
+        TorchVision Faster R-CNN wrapper.
 
         Args:
             device: 'cuda' or 'cpu'. Auto if None.
-            weights: torchvision weights identifier, "DEFAULT" is COCO pretrained.
-            keep_classes: which COCO class IDs to keep (default: person=1, car=3)
+            weights: torchvision weights identifier. Use None when loading a full custom checkpoint.
+            keep_classes: which class IDs to keep (only used if you want filtering).
+            checkpoint_path: path to a .pth/.pt state_dict checkpoint.
+            num_classes: number of classes INCLUDING background (required if checkpoint is non-COCO).
+            map_location: used during torch.load.
         """
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load pretrained model WITH COCO head (do not replace predictor)
+        # 1) Build base model
+        # If you're loading a checkpoint, usually set weights=None (faster + avoids confusion)
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights)
+
+        # 3) Load checkpoint (state_dict)
+        if checkpoint_path is not None:
+            ckpt = torch.load(checkpoint_path, map_location=map_location)
+
+            # If you saved a dict like {"model": state_dict, ...}, handle that too:
+            if isinstance(ckpt, dict) and "model" in ckpt and isinstance(ckpt["model"], dict):
+                state_dict = ckpt["model"]
+            else:
+                state_dict = ckpt
+
+            missing, unexpected = self.model.load_state_dict(state_dict, strict=True)
+            if missing or unexpected:
+                # strict=True should normally prevent this, but just in case
+                print("Missing keys:", missing)
+                print("Unexpected keys:", unexpected)
+
         
         if use_partial_unfreeze:
             print("Partial Unfreeze: Freezing ResNet layers 1-3. Training layer4, FPN, RPN, and RoI Heads...")
@@ -43,8 +67,9 @@ class FasterRCNNWrapper:
         self.model.to(self.device)
         self.model.eval()
 
-        self.keep_classes = tuple(keep_classes)
-        self.keep_classes_t = torch.tensor(self.keep_classes, device=self.device, dtype=torch.int64)
+        self.keep_classes = tuple(keep_classes) if keep_classes is not None else None
+        if self.keep_classes is not None:
+            self.keep_classes_t = torch.tensor(self.keep_classes, device=self.device, dtype=torch.int64)
 
     @torch.inference_mode()
     def predict(self, images, confidence_threshold: float = 0.7):
