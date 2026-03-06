@@ -3,6 +3,7 @@ __pycache__
 logs/
 wandb/
 results/
+best_model_w1/
 
 # Files
 *.txt

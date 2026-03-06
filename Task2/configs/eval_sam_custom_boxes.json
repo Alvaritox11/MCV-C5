@@ -1,0 +1,16 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "SAM-Evaluation",
+    "wandb_run_name": "taskC_sam_week1_bboxes",
+
+    "mode": "evaluate",
+    "model_type": "sam",
+    "prompt_type": "custom_bbox",
+    
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    "week1_predictions_path": "/ghome/group05/alvaro/MCV-C5/Task2/best_model_w1/week1_yolo_predictions.json",
+    
+    "batch_size": 1, 
+    "custom_box_threshold": 0.5,
+    "apply_augmentations": false
+}
