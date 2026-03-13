@@ -17,8 +17,26 @@ class SAMWrapper:
         image: PIL.Image
         prompt_kwargs: dict with 'input_points' or 'input_boxes'
         """
+
+        print("Received prompt_kwargs:", prompt_kwargs)  # Debugging line to check the input format
+
+        if not prompt_kwargs:
+            return [], []
+            
+        if "input_points" in prompt_kwargs:
+            # Check if the list is completely empty, e.g., [[]]
+            if len(prompt_kwargs["input_points"][0]) == 0:
+                return [], []
+                
+        if "input_boxes" in prompt_kwargs:
+            # Check if the list is completely empty, e.g., [[]]
+            if len(prompt_kwargs["input_boxes"][0][0]) == 0:
+                return [], []
+
         # 1. Process inputs
         inputs = self.processor(image, **prompt_kwargs, return_tensors="pt").to(self.device)
+
+        print("Processed inputs:", {k: v.shape for k, v in inputs.items()})  # Debugging line to check processed input shapes
 
         # 2. Forward pass
         outputs = self.model(**inputs)

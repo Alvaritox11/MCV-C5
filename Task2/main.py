@@ -3,6 +3,7 @@ import time
 import torch
 import wandb
 import argparse
+import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
@@ -41,7 +42,7 @@ def evaluate_sam(model_wrapper, dataloader, dataset, config):
             # Base SAM (Task A) uses GT prompts and GT labels
             # if len(target["labels"]) == 0:
             #     continue
-            prompt_kwargs, extracted_labels = get_prompts(target, prompt_type=config["prompt_type"], config=config)
+            prompt_kwargs, extracted_labels = get_prompts(target, prompt_type=config["prompt_type"], config=config, image_np=np.array(image))
             
             if not prompt_kwargs: # Skip if no prompts were generated (e.g. no valid week 1 predictions for this image)
                 continue
