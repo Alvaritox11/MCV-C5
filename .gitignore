@@ -8,3 +8,7 @@ best_model_w1/
 # Files
 *.txt
 *.png
+*.xml
+
+domainshift/images/
+
