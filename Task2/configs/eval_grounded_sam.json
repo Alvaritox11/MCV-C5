@@ -1,7 +1,7 @@
 {
     "wandb_entity": "Team5-C5",
     "wandb_project": "SAM-Evaluation",
-    "wandb_run_name": "taskB_grounded_sam",
+    "wandb_run_name": "taskB_grounded_sam_v2_EXTRA_WORDS",
 
     "mode": "evaluate",
     "model_type": "grounded_sam",
@@ -13,7 +13,7 @@
     "confidence_threshold": 0.5,
     "apply_augmentations": false,
 
-    "text_prompt": "car . person .",
+    "text_prompt": "car . suv . pickup truck . child . person .",
     "box_threshold": 0.3,
     "text_threshold": 0.25
 }
