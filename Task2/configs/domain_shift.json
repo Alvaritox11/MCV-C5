@@ -1,0 +1,6 @@
+{
+    "data_dir": "domainshift",
+    "sam_model_name": "facebook/sam-vit-base",
+    "eval_split": "test",
+    "batch_size": 1
+}
