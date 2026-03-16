@@ -3,11 +3,26 @@ import numpy as np
 from transformers import SamModel, SamProcessor
 
 class SAMWrapper:
-    def __init__(self, device, model_name="facebook/sam-vit-base"):
+    def __init__(self, device, model_name="facebook/sam-vit-base", checkpoint_path=None):
         self.device = device
         # Load the SAM processor and model
         self.processor = SamProcessor.from_pretrained(model_name)
-        self.model = SamModel.from_pretrained(model_name).to(self.device)
+        # 1. Always load the base model architecture and config first
+        self.model = SamModel.from_pretrained("facebook/sam-vit-base")
+        
+        # 2. If a checkpoint is provided, overwrite the base weights with your fine-tuned ones
+        if checkpoint_path:
+            print(f"Applying fine-tuned weights from {checkpoint_path}...")
+            
+            # Load the .pth file using PyTorch
+            state_dict = torch.load(checkpoint_path, map_location=self.device)
+            
+            # (Optional) If you saved your weights inside a dictionary (e.g., state_dict['model_state']), 
+            # you might need to extract them like this:
+            # state_dict = state_dict['model_state'] 
+            
+            # Inject the weights into the model
+            self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
 
     @torch.inference_mode()
