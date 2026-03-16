@@ -81,6 +81,7 @@ class KittiMotsDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[Any, Dict[str, Any]]:
         sample = self.samples[idx]
+        
         image = Image.open(sample["path"]).convert("RGB")
         img_w, img_h = image.size
 
@@ -118,3 +119,16 @@ class KittiMotsDataset(Dataset):
 
 def detection_collate_fn(batch):
     return tuple(zip(*batch))
+
+def instances_to_semantic(masks, labels, image_shape):
+    semantic_mask = np.zeros(image_shape, dtype=np.uint8)
+    if len(masks) == 0:
+        return semantic_mask
+        
+    areas = [np.sum(m) for m in masks]
+    sorted_indices = np.argsort(areas)[::-1]
+    
+    for idx in sorted_indices:
+        semantic_mask[masks[idx] > 0] = labels[idx]
+        
+    return semantic_mask

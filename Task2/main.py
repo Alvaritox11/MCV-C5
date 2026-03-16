@@ -4,10 +4,10 @@ import torch
 import wandb
 import argparse
 from tqdm import tqdm
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, instances_to_semantic
 
 from src.dataset import KittiMotsDataset, detection_collate_fn
-from src.metrics import CocoEvaluator
+from src.metrics import CocoEvaluator, SemanticEvaluator
 from src.prompts import get_prompts
 from src.models.sam_wrapper import SAMWrapper
 from src.models.grounded_sam_wrapper import GroundedSAMWrapper
@@ -89,7 +89,32 @@ def evaluate_sam(model_wrapper, dataloader, dataset, config):
         evaluator.update([prediction])
         
     stats, map_car, map_ped = evaluator.summarize() 
-    return stats, map_car, map_ped
+    return stats, map_car, 
+
+@torch.inference_mode()
+def evaluate_semantic_sam(model_wrapper, dataloader, config, image_shape=(375, 1242)):
+    evaluator = SemanticEvaluator(num_classes=4) 
+    
+    for images, targets in dataloader:
+        image = images[0]
+        target = targets[0]
+        
+        gt_masks = target["masks"].numpy()
+        gt_labels = target["labels"].numpy()
+        gt_semantic = instances_to_semantic(gt_masks, gt_labels, image_shape)
+        
+        pred_masks, _, _, pred_labels, _ = model_wrapper.predict(
+            image, 
+            text_prompt=config["text_prompt"],
+            box_threshold=config.get("box_threshold", 0.3),
+            text_threshold=config.get("text_threshold", 0.25)
+        )
+        
+        pred_semantic = instances_to_semantic(pred_masks, pred_labels, image_shape)
+        evaluator.update(pred_semantic, gt_semantic)
+        
+    iou_per_class, miou = evaluator.compute_iou()
+    return iou_per_class, miou
 
 def main():
     parser = argparse.ArgumentParser(description="C5 Object Segmentation Pipeline")
