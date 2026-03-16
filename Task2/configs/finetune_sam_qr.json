@@ -1,0 +1,5 @@
+{
+  "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+  "sam_model_name": "facebook/sam-vit-base",
+  "checkpoint_path": "checkpoints/sam_bbox_finetune_aug_basic_lr1e-5_lrcosdecay_long.pth"
+}

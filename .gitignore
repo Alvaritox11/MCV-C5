@@ -7,3 +7,7 @@ results/
 # Files
 *.txt
 *.png
+*.xml
+
+domainshift/images/
+
