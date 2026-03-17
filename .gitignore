@@ -4,6 +4,8 @@ logs/
 wandb/
 results/
 best_model_w1/
+results_wandb/
+checkpoints/
 
 # Files
 *.txt
