@@ -1,0 +1,9 @@
+{
+    "model_type": "faster_rcnn", 
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    "freeze_base": true,
+    "use_partial_unfreeze": false,
+    "batch_size": 16,
+    "confidence_threshold": 0.5,
+    "apply_augmentations": false
+}

@@ -1,0 +1,3 @@
+[submodule "Task3/vizwiz_API"]
+	path = Task3/vizwiz_API
+	url = https://github.com/Yinan-Zhao/vizwiz-caption.git

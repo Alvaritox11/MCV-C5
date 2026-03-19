@@ -1,0 +1,15 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "SAM-Evaluation",
+    "wandb_run_name": "taskA_sam_grid_points_3pt_LAST",
+
+    "mode": "evaluate",
+    "model_type": "sam",
+    "prompt_type": "grid_point",
+    "grid_size": 3,
+    
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    
+    "batch_size": 1, 
+    "apply_augmentations": false
+}

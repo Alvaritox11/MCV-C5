@@ -95,3 +95,32 @@ class CocoEvaluator:
             if len(s[s > -1]) > 0: map_car = float(np.mean(s[s > -1]))
 
         return stats, map_car, map_pedestrian
+
+
+class SemanticEvaluator:
+    def __init__(self, num_classes=4):
+        self.num_classes = num_classes
+        self.confusion_matrix = np.zeros((num_classes, num_classes))
+
+    def update(self, pred_mask, gt_mask):
+        valid_mask = (gt_mask >= 0) & (gt_mask < self.num_classes)
+        bincount_2d = np.bincount(
+            self.num_classes * gt_mask[valid_mask].astype(int) + pred_mask[valid_mask].astype(int),
+            minlength=self.num_classes ** 2
+        )
+        self.confusion_matrix += bincount_2d.reshape((self.num_classes, self.num_classes))
+
+    def compute_metrics(self):
+        tp = np.diag(self.confusion_matrix)
+        gt_set = self.confusion_matrix.sum(axis=1)
+        pred_set = self.confusion_matrix.sum(axis=0)
+        
+        union = gt_set + pred_set - tp
+        iou = tp / np.maximum(union, 1e-10)
+        dice = (2 * tp) / np.maximum(gt_set + pred_set, 1e-10)
+        
+        valid_classes = [1, 3]
+        miou = np.nanmean(iou[valid_classes])
+        mdice = np.nanmean(dice[valid_classes])
+        
+        return iou, miou, dice, mdice

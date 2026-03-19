@@ -1,0 +1,21 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "RT_DETR",
+    "wandb_run_name": "RT_DeTR_inference",
+    
+    "mode": "evaluate", 
+    "model_type": "detr", 
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    
+    "freeze_base": false,
+    "use_lora": true,
+    "lora_alpha": 64,
+    "lora_r": 8,
+    "batch_size": 16, 
+    "epochs": 15,
+    "learning_rate": 1e-5, 
+    "weight_decay": 1e-4,
+    "confidence_threshold": 0.5,
+    "apply_augmentations": "basic"
+}
+

@@ -10,15 +10,44 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import functional as F
 
 # Import your custom classes
-from src.dataset import KittiMotsDataset, detection_collate_fn
+from src.dataset import KittiMotsDataset, DeArtDataset, detection_collate_fn
 from src.metrics import CocoEvaluator
 from src.models.frnn_wrapper import FasterRCNNWrapper
 from src.models.detr_wrapper import DetrWrapper
 from src.models.yolo_wrapper import YoloWrapper
+from src.models.rt_detr_wrapper import Rt_DetrWrapper
 
 def load_config(config_path="configs/detr_config.json"):
     with open(config_path, 'r') as f:
         return json.load(f)
+
+def build_dataset(root_dir, split, transforms=None):
+    """
+    Automatically selects the correct Dataset class
+    based on the directory structure.
+    """
+
+    # Heurística 1: DEArt
+    if os.path.exists(os.path.join(root_dir, "annots_pub")) and \
+       os.path.exists(os.path.join(root_dir, "splits")):
+        print("Detected DEArt dataset")
+        return DeArtDataset(
+            root_dir=root_dir,
+            split=split,
+            transforms=transforms
+        )
+
+    # Heurística 2: KITTI-MOTS
+    if os.path.exists(os.path.join(root_dir, "training")) and \
+       os.path.exists(os.path.join(root_dir, "instances_txt")):
+        print("Detected KITTI-MOTS dataset")
+        return KittiMotsDataset(
+            root_dir=root_dir,
+            split=split,
+            transforms=transforms
+        )
+
+    raise RuntimeError(f"Could not infer dataset type from {root_dir}")
 
 def get_transforms(aug_type, is_train):
     """Returns Albumentations transforms based on the requested strategy."""
@@ -81,7 +110,7 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
         # ---------------------------------------------------------
         # DETR FORWARD PASS
         # ---------------------------------------------------------
-        elif isinstance(model_wrapper, DetrWrapper):
+        elif isinstance(model_wrapper, DetrWrapper) or isinstance(model_wrapper, Rt_DetrWrapper):
             labels_list = []
             for tgt in targets:
                 h, w = tgt['orig_size']
@@ -120,7 +149,7 @@ def train_one_epoch(model_wrapper, dataloader, optimizer, device, epoch):
         losses.backward()
         
         # Gradient clipping is highly recommended for DETR
-        if isinstance(model_wrapper, DetrWrapper):
+        if isinstance(model_wrapper, (DetrWrapper, Rt_DetrWrapper)):
             torch.nn.utils.clip_grad_norm_(model_wrapper.model.parameters(), max_norm=0.1)
             
         optimizer.step()
@@ -152,7 +181,7 @@ def evaluate(model_wrapper, dataloader, dataset, config):
         # ---------------------------------------------------------
         # DETR: One-Pass Validation (Loss + Predictions)
         # ---------------------------------------------------------
-        if config["model_type"] == "detr" and hasattr(model_wrapper, 'processor'):
+        if config["model_type"] in ["detr", "rt_detr"] and hasattr(model_wrapper, 'processor'):
             labels_list = []
             target_sizes_list = []
             
@@ -195,7 +224,7 @@ def evaluate(model_wrapper, dataloader, dataset, config):
             )
             
             predictions = []
-            keep_classes = [1, 3] # Person and Car
+            keep_classes = [1] if dataset.dataset_type == "deart" else [1, 3]
             for result in processed_results:
                 b, s, l = result['boxes'].cpu().tolist(), result['scores'].cpu().tolist(), result['labels'].cpu().tolist()
                 filtered = {'boxes': [], 'scores': [], 'labels': []}
@@ -277,8 +306,10 @@ def main():
     train_transforms = get_transforms(config.get("apply_augmentations", "none"), is_train=True)
     val_transforms = get_transforms("none", is_train=False) 
 
-    train_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="train", transforms=train_transforms)
-    val_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="val", transforms=val_transforms)
+    # train_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="train", transforms=train_transforms)
+    # val_dataset = KittiMotsDataset(root_dir=config["data_dir"], split="val", transforms=val_transforms)
+    train_dataset = build_dataset(root_dir=config["data_dir"], split="train", transforms=train_transforms)
+    val_dataset = build_dataset(root_dir=config["data_dir"], split="val", transforms=val_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, collate_fn=detection_collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], shuffle=False, collate_fn=detection_collate_fn)
@@ -290,6 +321,9 @@ def main():
         wrapper = DetrWrapper(device=device, freeze_base=config.get("freeze_base", False), use_lora=config.get("use_lora", False))
     elif config["model_type"] == "yolo":
         wrapper = YoloWrapper(device=device)
+    elif config["model_type"] == "rt_detr":
+        wrapper = Rt_DetrWrapper(
+            device=device, freeze_base=config.get("freeze_base", False), use_lora=config.get("use_lora", False), lora_r=config.get("lora_r", 8), lora_alpha=config.get("lora_alpha", 32))
     else:
         raise ValueError("Invalid model_type in config.")
     
@@ -305,15 +339,28 @@ def main():
         stats, map_car, map_ped, fps, val_loss, val_loss_ce, val_loss_bbox = evaluate(wrapper, val_loader, val_dataset, config)
         
         if stats is not None:
-            eval_metrics = {
-                **get_all_stats(stats, "val"),
-                "val/mAP_Car": map_car, 
-                "val/mAP_Pedestrian": map_ped, 
-                "system/inference_fps": fps
-            }
-            
+            # eval_metrics = {
+            #     **get_all_stats(stats, "val"),
+            #     "val/mAP_Car": map_car, 
+            #     "val/mAP_Pedestrian": map_ped, 
+            #     "system/inference_fps": fps
+            # }
+            if val_dataset.dataset_type == "deart":
+                eval_metrics = {
+                    **get_all_stats(stats, "val"),
+                    "val/mAP_Person": map_ped,
+                    "system/inference_fps": fps
+                }
+            else:
+                eval_metrics = {
+                    **get_all_stats(stats, "val"),
+                    "val/mAP_Car": map_car,
+                    "val/mAP_Pedestrian": map_ped,
+                    "system/inference_fps": fps
+                }
+
             # FIX: Conditionally log DETR validation loss during step 0 evaluation
-            if config["model_type"] == "detr":
+            if config["model_type"] == "detr" or config["model_type"] == "rt_detr":
                 eval_metrics.update({
                     "val/total_loss": val_loss,
                     "val/loss_ce": val_loss_ce,
@@ -338,6 +385,7 @@ def main():
             print(f"Validating Epoch {epoch}...")
             val_stats, val_map_car, val_map_ped, fps, val_loss, val_loss_ce, val_loss_bbox = evaluate(wrapper, val_loader, val_dataset, config)
 
+            # For DEArt, val_mAP corresponds to person-only mAP
             val_mAP = val_stats[0] if val_stats is not None else 0.0
             max_mem = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0.0
             
@@ -355,16 +403,16 @@ def main():
                 # "train/mAP_small": train_stats[3] if train_stats is not None else 0.0,
                 # "train/mAP_medium": train_stats[4] if train_stats is not None else 0.0,
                 # "train/mAP_large": train_stats[5] if train_stats is not None else 0.0,
-                "train/mAP_Car": train_map_car,
-                "train/mAP_Pedestrian": train_map_ped,
+                # "train/mAP_Car": train_map_car,
+                # "train/mAP_Pedestrian": train_map_ped,
 
                 **get_all_stats(val_stats, "val"),
                 # "val/mAP_0.5_0.95": mAP,
                 # "val/mAP_small": stats[3] if stats is not None else 0.0,
                 # "val/mAP_medium": stats[4] if stats is not None else 0.0,
                 # "val/mAP_large": stats[5] if stats is not None else 0.0,
-                "val/mAP_Car": val_map_car,
-                "val/mAP_Pedestrian": val_map_ped,
+                # "val/mAP_Car": val_map_car,
+                # "val/mAP_Pedestrian": val_map_ped,
 
                 "system/epoch_time_sec": epoch_time,
                 "system/inference_fps": fps,
@@ -372,7 +420,21 @@ def main():
                 "system/trainable_params": trainable_params
             }
 
-            if config["model_type"] == "detr":
+            if train_dataset.dataset_type == "deart":
+                epoch_metrics.update({
+                    "train/mAP_Person": train_map_ped,
+                    "val/mAP_Person": val_map_ped,
+                })
+            else:
+                epoch_metrics.update({
+                    "train/mAP_Car": train_map_car,
+                    "train/mAP_Pedestrian": train_map_ped,
+                    "val/mAP_Car": val_map_car,
+                    "val/mAP_Pedestrian": val_map_ped,
+                })
+            
+                
+            if config["model_type"] == "detr" or config["model_type"] == "rt_detr":
                 epoch_metrics.update({
                     "val/total_loss": val_loss,
                     "val/loss_ce": val_loss_ce,

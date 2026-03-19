@@ -7,11 +7,38 @@
 #SBATCH -o logs/out_%u_%j.log   # File to which STDOUT will be written
 #SBATCH -e logs/err_%u_%j.log   # File to which STDERR will be written
 
-# source activate c5_env
+# python main.py --config configs/FRNN/step0_frnn_inference.json
 
-# python main.py --mode eval --model detr --use_wandb \
-#   --wandb_entity Team5-C5 \
-#   --wandb_project DETR \
-#   --wandb_run_name DETR_1st_run
+# python main.py --config configs/FRNN/step1_frnn_head_baseline.json
 
-python main.py --config configs/some_experiments/detr_fine_tuning.json
+# python main.py --config configs/FRNN/step2_frnn_augs_basic.json
+
+# python main.py --config configs/FRNN/step2_frnn_augs_weather.json
+
+# python main.py --config configs/FRNN/step3_frnn_full_finetune.json
+
+# python main.py --config configs/FRNN/step3_frnn_full_finetune_partial.json
+
+# python main.py --config configs/DETR/step0_detr_inference.json
+
+# python main.py --config configs/DETR/step1_detr_head_baseline.json
+
+# python main.py --config configs/DETR/step2_detr_augs_basic.json
+
+# python main.py --config configs/DETR/step2_detr_augs_weather.json
+
+# python main.py --config configs/DETR/step3_detr_full_finetune.json
+
+# python main.py --config configs/DETR/step3_detr_full_finetune_lora.json
+
+# python main.py --config configs/DETR/detr_DeART_inference.json
+
+# python main.py --config configs/FRNN/frnn_DeART_inference.json
+
+# python main.py --config configs/DETR/detr_DeART_lora.json
+
+# python main.py --config configs/FRNN/frnn_DeART_head.json
+
+# python main.py --config configs/DETR/detr_DeART_lora.json
+
+# python thresholds.py 

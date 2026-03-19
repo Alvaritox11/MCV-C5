@@ -1,0 +1,32 @@
+project: "FRNN_SWEEP"
+entity: "Team5-C5"
+program: main_sweep.py
+method: bayes
+metric:
+  name: val/mAP_0.50_0.95_all
+  goal: maximize
+
+parameters:
+  # 1. Lock the architecture to Head-Only
+  freeze_base:
+    value: true
+  use_partial_unfreeze:
+    value: false
+    
+  # 2. The Bayesian Search Space
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00005  # 5e-5
+    max: 0.01     # 1e-2
+    
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.00001  # 1e-5
+    max: 0.01     # 1e-2
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--config"
+  - "configs/sweeps/frnn_baseline.json"

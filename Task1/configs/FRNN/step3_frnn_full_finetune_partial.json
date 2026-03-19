@@ -11,7 +11,7 @@
     "use_partial_unfreeze": true,
     "batch_size": 16,
     "epochs": 20,
-    "learning_rate": 1e-4,
+    "learning_rate": 1e-5,
     "weight_decay": 1e-4,
     "confidence_threshold": 0.5,
     "apply_augmentations": false

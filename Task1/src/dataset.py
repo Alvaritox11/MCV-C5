@@ -2,6 +2,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import xml.etree.ElementTree as ET
 import pycocotools.mask as mask_utils
 import torch
 from PIL import Image
@@ -54,6 +55,7 @@ class KittiMotsDataset(Dataset):
         self.transforms = transforms
         self.return_masks = return_masks
         self.include_seq_in_target = include_seq_in_target
+        self.dataset_type = "kitti_mots"
 
         # Default mapping: KITTI-MOTS: 1=Car, 2=Pedestrian
         # Use your own if you want contiguous labels (e.g. {1:1,2:2})
@@ -330,3 +332,145 @@ class KittiMotsDataset(Dataset):
 def detection_collate_fn(batch):
     """Standard collate_fn for TorchVision detection models."""
     return tuple(zip(*batch))
+
+
+class DeArtDataset(Dataset):
+    """
+    DEArt (Pascal VOC XML) -> TorchVision detection-style dataset.
+
+    Only keeps PERSON class mapped to COCO id = 1.
+
+    Returns:
+        image, target dict with:
+            - boxes (FloatTensor[N,4], xyxy)
+            - labels (Int64Tensor[N])
+            - image_id (Int64Tensor[1])
+            - area (FloatTensor[N])
+            - iscrowd (UInt8Tensor[N])
+            - orig_size (Int64Tensor[2])
+            - size (Int64Tensor[2])
+    """
+
+    def __init__(
+        self,
+        root_dir: str,
+        split: str = "train",
+        transforms: Optional[Callable] = None,
+        class_name: str = "person",
+    ):
+        """
+        Expected structure:
+            root/
+            ├── images/
+            │   ├── 00000028.jpg
+            │   └── ...
+            ├── annots_pub/
+            │   ├── 00000028.xml
+            │   └── ...
+            ├── splits/
+            │   ├── train.txt
+            │   └── val.txt
+        """
+        self.root_dir = root_dir
+        self.transforms = transforms
+        self.class_name = class_name
+        self.class_map = {class_name: 1}  # COCO person
+        self.dataset_type = "deart"
+
+        self.img_dir = os.path.join(root_dir, "images")
+        self.ann_dir = os.path.join(root_dir, "annots_pub")
+
+        split_file = os.path.join(root_dir, "splits", f"{split}.txt")
+        if not os.path.exists(split_file):
+            raise FileNotFoundError(f"Missing split file: {split_file}")
+
+        with open(split_file, "r") as f:
+            self.ids = [line.strip() for line in f if line.strip()]
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def _parse_xml(self, xml_path: str) -> Tuple[List[List[float]], List[int]]:
+        """
+        Parses a Pascal VOC XML file.
+        Returns boxes (xyxy) and labels.
+        """
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        boxes: List[List[float]] = []
+        labels: List[int] = []
+
+        for obj in root.findall("object"):
+            name = obj.find("name").text
+            if name != self.class_name:
+                continue
+
+            bndbox = obj.find("bndbox")
+            xmin = float(bndbox.find("xmin").text)
+            ymin = float(bndbox.find("ymin").text)
+            xmax = float(bndbox.find("xmax").text)
+            ymax = float(bndbox.find("ymax").text)
+
+            if xmax <= xmin or ymax <= ymin:
+                continue
+
+            boxes.append([xmin, ymin, xmax, ymax])
+            labels.append(self.class_map[name])
+
+        return boxes, labels
+
+    def __getitem__(self, idx: int) -> Tuple[Any, Dict[str, Any]]:
+        img_id = self.ids[idx]
+
+        img_path = os.path.join(self.img_dir, img_id)
+        xml_path = os.path.join(self.ann_dir, os.path.splitext(img_id)[0] + ".xml")
+
+        image = Image.open(img_path).convert("RGB")
+        img_w, img_h = image.size
+
+        boxes, labels = self._parse_xml(xml_path)
+
+        boxes_t = torch.as_tensor(boxes, dtype=torch.float32)
+        if boxes_t.numel() == 0:
+            boxes_t = torch.empty((0, 4), dtype=torch.float32)
+
+        labels_t = torch.as_tensor(labels, dtype=torch.int64)
+
+        target: Dict[str, Any] = {
+            "boxes": boxes_t,
+            "labels": labels_t,
+            "image_id": torch.tensor([idx], dtype=torch.int64),
+            "orig_size": torch.tensor([img_h, img_w], dtype=torch.int64),
+            "size": torch.tensor([img_h, img_w], dtype=torch.int64),
+        }
+
+        if boxes_t.numel() > 0:
+            area = (boxes_t[:, 2] - boxes_t[:, 0]) * (boxes_t[:, 3] - boxes_t[:, 1])
+        else:
+            area = torch.zeros((0,), dtype=torch.float32)
+
+        target["area"] = area
+        target["iscrowd"] = torch.zeros((labels_t.shape[0],), dtype=torch.uint8)
+
+        if self.transforms is not None:
+            try:
+                img_np = np.array(image)
+                transformed = self.transforms(
+                    image=img_np,
+                    bboxes=boxes,
+                    labels=labels,
+                )
+                image = transformed["image"]
+                target["boxes"] = torch.as_tensor(transformed["bboxes"], dtype=torch.float32)
+                if target["boxes"].numel() == 0:
+                    target["boxes"] = torch.empty((0, 4), dtype=torch.float32)
+                target["labels"] = torch.as_tensor(transformed["labels"], dtype=torch.int64)
+
+                h2, w2 = image.shape[:2] if isinstance(image, np.ndarray) else image.size[::-1]
+                target["size"] = torch.tensor([h2, w2], dtype=torch.int64)
+
+            except TypeError:
+                image, target = self.transforms(image, target)
+
+        return image, target

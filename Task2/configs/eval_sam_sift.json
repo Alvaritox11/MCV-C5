@@ -1,0 +1,17 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "SAM-Evaluation",
+    "wandb_run_name": "taskA_sam_sift_5pt",
+
+    "mode": "evaluate",
+    "model_type": "sam",
+    "prompt_type": "sift_point",
+    "num_points": 5,
+    
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    
+    "batch_size": 1, 
+    "log_image_interval": 20,
+    "confidence_threshold": 0.5,
+    "apply_augmentations": false
+}

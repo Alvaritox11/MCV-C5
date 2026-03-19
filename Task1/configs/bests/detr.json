@@ -1,0 +1,13 @@
+{
+
+    "model_type": "detr", 
+    "data_dir": "/home/mcv/datasets/C5/KITTI-MOTS/",
+    "freeze_base": false,
+    "use_lora": true,
+    "batch_size": 16, 
+    "confidence_threshold": 0.5,
+    "apply_augmentations": "basic", 
+    "lora_r": 8,
+    "lora_alpha": 64
+}
+

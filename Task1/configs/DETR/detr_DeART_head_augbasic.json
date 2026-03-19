@@ -1,0 +1,18 @@
+{
+    "wandb_entity": "Team5-C5",
+    "wandb_project": "DETR_DeART",
+    "wandb_run_name": "DETR_head_augbasic",
+
+    "mode": "train", 
+    "model_type": "detr", 
+    "data_dir": "/ghome/group05/c5_data/",
+    
+    "freeze_base": true,
+    "use_lora": false,
+    "batch_size": 16,
+    "epochs": 5,
+    "learning_rate": 1e-5,
+    "weight_decay": 1e-4,
+    "confidence_threshold": 0.5,
+    "apply_augmentations": "basic"
+}

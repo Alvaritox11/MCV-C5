@@ -4,7 +4,7 @@ from peft import LoraConfig, get_peft_model
 from PIL import Image
 
 class DetrWrapper:
-    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False, use_lora=False):
+    def __init__(self, model_name="facebook/detr-resnet-50", device=None, freeze_base=False, use_lora=False, lora_r=8, lora_alpha=32):
         """
         Initializes the DETR model and processor from HuggingFace.
         
@@ -32,8 +32,8 @@ class DetrWrapper:
         if use_lora:
             print("Applying LoRA to DETR Attention layers...")
             lora_config = LoraConfig(
-                r=8, # Sweetspot, aovid memorize data 
-                lora_alpha=32, # alpha = 4 * r (common choice). Pay heavy attention to the new features without needing to add more params
+                r=lora_r, # Sweetspot, aovid memorize data 
+                lora_alpha=lora_alpha, # alpha = 4 * r (common choice). Pay heavy attention to the new features without needing to add more params
                 target_modules=["q_proj", "v_proj"], # Target the attention matrices
                 modules_to_save=["class_labels_classifier", "bbox_predictor"], # " List of modules ... to be set as trainable" as well
                 bias="none" # ignore bias
