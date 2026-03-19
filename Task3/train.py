@@ -1,42 +1,42 @@
 # train.py
 
-import os  
+import os
+import json
+import argparse
 import wandb 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 import evaluate
+import matplotlib.pyplot as plt
 
-import config
+import vocab
 from dataset import get_dataloaders
 from models import BaselineModel
 
-# Load the evaluation metrics
 bleu = evaluate.load('bleu')
 rouge = evaluate.load('rouge')
 meteor = evaluate.load('meteor')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def train_one_epoch(model, optimizer, crit, dataloader):
+def train_one_epoch(model, optimizer, crit, dataloader, cfg):
     model.train()
     total_loss = 0
-    
-    # tqdm gives us a nice progress bar
     loop = tqdm(dataloader, desc="Training", leave=False)
-    for imgs, captions, _ in loop: # _ ignores the raw text strings from our dataset
+    for imgs, captions, _ in loop:
         imgs, captions = imgs.to(device), captions.to(device)
         
         optimizer.zero_grad()
         
-        # Forward pass
-        preds = model(imgs)
-        
-        # Calculate loss (CrossEntropy expects raw logits and class indices)
-        loss = crit(preds, captions)
-        
-        # Backward pass
+        if cfg.get("teacher_forcing", False):
+            preds = model(imgs, captions)
+        else:
+            preds = model(imgs)
+            
+        # Shift captions by 1 to match the seq_len-1 output of the model
+        loss = crit(preds, captions[:, 1:])
         loss.backward()
         optimizer.step()
         
@@ -45,42 +45,69 @@ def train_one_epoch(model, optimizer, crit, dataloader):
         
     return total_loss / len(dataloader)
 
-def evaluate_and_log(model, crit, dataloader):
+def evaluate_and_log(model, crit, dataloader, epoch, output_dir):
     model.eval()
     total_loss = 0
     all_preds = []
     all_refs = []
     
+    plot_saved = False 
+    
     with torch.no_grad():
         loop = tqdm(dataloader, desc="Evaluating", leave=False)
-        for imgs, captions, raw_captions in loop:
+        for imgs, captions, all_raw_captions in loop:
             imgs, captions = imgs.to(device), captions.to(device)
+            output = model(imgs) 
             
-            # Forward pass
-            output = model(imgs) # Shape: (batch, NUM_CHAR, seq_len)
-            
-            # 1. Calculate Loss
-            loss = crit(output, captions)
+            # Shift target here as well for loss tracking
+            loss = crit(output, captions[:, 1:])
             total_loss += loss.item()
             
-            # 2. Decode Predictions for Metrics
             pred_ids = torch.argmax(output, dim=1)
             
+            refs_for_batch = []
+            for b in range(imgs.size(0)):
+                refs_for_batch.append([all_raw_captions[j][b] for j in range(len(all_raw_captions))])
+            
+            batch_preds = []
             for i in range(pred_ids.shape[0]):
                 pred_str = ""
                 for char_id in pred_ids[i]:
-                    char = config.IDX2CHAR[char_id.item()]
-                    if char == '<EOS>':
-                        break
-                    if char not in ['<SOS>', '<PAD>']:
-                        pred_str += char
+                    char = vocab.IDX2CHAR[char_id.item()]
+                    if char == '<EOS>': break
+                    if char not in ['<SOS>', '<PAD>']: pred_str += char
                 
+                batch_preds.append(pred_str)
                 all_preds.append(pred_str)
-                all_refs.append([raw_captions[i]]) 
-    
+                all_refs.append(refs_for_batch[i]) 
+                
+            if not plot_saved:
+                plot_saved = True
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
+                
+                for img_idx in range(min(2, imgs.size(0))):
+                    unnorm_img = imgs[img_idx] * std + mean
+                    unnorm_img = torch.clamp(unnorm_img, 0, 1).cpu().permute(1, 2, 0).numpy()
+                    
+                    gt_text = "\n".join([f"- {txt}" for txt in refs_for_batch[img_idx][:3]]) 
+                    pred_text = batch_preds[img_idx]
+                    
+                    fig, ax = plt.subplots(figsize=(8, 8))
+                    ax.imshow(unnorm_img)
+                    ax.axis('off')
+                    ax.set_title(f"PRED: {pred_text}\n\nGT:\n{gt_text}", fontsize=10, loc='left')
+                    
+                    plot_path = os.path.join(output_dir, "plots", f"epoch_{epoch}_img_{img_idx}.png")
+                    plt.savefig(plot_path, bbox_inches='tight')
+                    wandb.log({f"Qualitative/Epoch_{epoch}_Img_{img_idx}": wandb.Image(plot_path)})
+                    plt.close(fig)
+
     avg_loss = total_loss / len(dataloader)
     
-    # Compute metrics using Hugging Face evaluate 
+    with open(os.path.join(output_dir, "predictions.json"), "w") as f:
+        json.dump({"predictions": all_preds, "references": all_refs}, f, indent=4)
+    
     bleu1_score = bleu.compute(predictions=all_preds, references=all_refs, max_order=1)['bleu']
     bleu2_score = bleu.compute(predictions=all_preds, references=all_refs, max_order=2)['bleu']
     rouge_score = rouge.compute(predictions=all_preds, references=all_refs)['rougeL']
@@ -93,74 +120,62 @@ def evaluate_and_log(model, crit, dataloader):
         "ROUGE-L": rouge_score * 100,
         "METEOR": meteor_score * 100
     }
-    
     return metrics
 
 def main():
-    # Create a directory to store checkpoints if it doesn't exist
-    os.makedirs("checkpoints", exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, required=True, help='Path to the config.json file')
+    args = parser.parse_args()
+    
+    with open(args.config, 'r') as f:
+        cfg = json.load(f)
+        
+    output_dir = os.path.join("outputs", cfg["run_name"])
+    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "plots"), exist_ok=True)
     
     wandb.init(
-        project="ImageCaptioning",
-        entity="Team5-C5",
-        name="baseline-resnet18-gru-char",
-        config={
-            "encoder": "ResNet-18",
-            "decoder": "GRU",
-            "level": "Character",
-            "epochs": config.EPOCHS,
-            "batch_size": config.BATCH_SIZE,
-            "learning_rate": 0.0001
-        }
+        project=cfg["wandb_project"],
+        entity=cfg["wandb_entity"],
+        name=cfg["run_name"],
+        config=cfg
     )
     
     print("Initializing DataLoaders...")
-    train_loader, valid_loader, test_loader = get_dataloaders()
+    train_loader, valid_loader, test_loader = get_dataloaders(cfg)
     
     print("Initializing Baseline Model...")
-    model = BaselineModel().to(device)
+    # PASS CFG to the model
+    model = BaselineModel(cfg).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.get("learning_rate", 1e-4))
+    crit = nn.CrossEntropyLoss(ignore_index=vocab.CHAR2IDX['<PAD>'])
     
-    optimizer = optim.Adam(model.parameters(), lr=wandb.config.learning_rate)
-    crit = nn.CrossEntropyLoss(ignore_index=config.CHAR2IDX['<PAD>'])
-    
-    # Initialize a variable to keep track of the best validation loss
     best_valid_loss = float('inf')
     
     print("Starting Training Loop...")
-    for epoch in range(wandb.config.epochs):
-        
-        # 1. Train for one epoch
-        train_loss = train_one_epoch(model, optimizer, crit, train_loader)
-        
-        # 2. Evaluate and get all metrics in one efficient pass
-        metrics = evaluate_and_log(model, crit, valid_loader)
+    for epoch in range(1, cfg.get("epochs", 10) + 1):
+        # PASS CFG to train epoch
+        train_loss = train_one_epoch(model, optimizer, crit, train_loader, cfg)
+        metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir)
         valid_loss = metrics["Valid Loss"]
         
-        print(f"Epoch {epoch+1}/{wandb.config.epochs} | Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
+        print(f"Epoch {epoch}/{cfg.get('epochs', 10)} | Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
         print(f"Metrics: BLEU-1: {metrics['BLEU-1']:.1f}% | ROUGE-L: {metrics['ROUGE-L']:.1f}%")
         
-        # 3. Log to W&B
-        wandb.log({
-            "epoch": epoch + 1,
-            "train_loss": train_loss,
-            **metrics # This unpacks the entire metrics dictionary into W&B
-        })
+        wandb.log({"epoch": epoch, "train_loss": train_loss, **metrics})
         
-        # 4. Save the Checkpoint if it's the best one so far!
         if valid_loss < best_valid_loss:
             print(f"🌟 Validation loss improved from {best_valid_loss:.4f} to {valid_loss:.4f}. Saving checkpoint!")
             best_valid_loss = valid_loss
             
-            checkpoint_path = f"checkpoints/best_baseline_model.pth"
+            ckpt_path = os.path.join(output_dir, "checkpoints", "best_model.pth")
             torch.save({
-                'epoch': epoch + 1,
+                'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'valid_loss': valid_loss,
-            }, checkpoint_path)
-            
-            # Optional: Save it directly to W&B cloud as well
-            wandb.save(checkpoint_path)
+            }, ckpt_path)
+            wandb.save(ckpt_path)
 
     wandb.finish()
     print("Training Complete!")
