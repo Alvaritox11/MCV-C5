@@ -7,4 +7,5 @@
 #SBATCH -o logs/out_%u_%j.log   # File to which STDOUT will be written
 #SBATCH -e logs/err_%u_%j.log   # File to which STDERR will be written
 
-python train.py
+python train.py --config configs/resnet50_gru_gerard_test2.json
+python train.py --config configs/resnet50_gru_gerard_test3.json
