@@ -49,7 +49,7 @@ def train_one_epoch(model, optimizer, crit, dataloader, cfg):
 
 
 # def evaluate_and_log(model, crit, dataloader, epoch, output_dir):
-def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
+def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg):
     model.eval()
     total_loss = 0
     all_preds = []
@@ -61,13 +61,19 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
         loop = tqdm(dataloader, desc="Evaluating", leave=False)
         for imgs, captions, all_raw_captions in loop:
             imgs, captions = imgs.to(device), captions.to(device)
-            output = model(imgs)
 
-            # Shift target here as well for loss tracking
-            loss = crit(output, captions[:, 1:])
+            # ---- LOSS: match training mode ----
+            if cfg.get("teacher_forcing", False):
+                loss_output = model(imgs, captions)
+            else:
+                loss_output = model(imgs)
+
+            loss = crit(loss_output, captions[:, 1:])
             total_loss += loss.item()
 
-            pred_ids = torch.argmax(output, dim=1)
+            # ---- METRICS: always autoregressive generation ----
+            gen_output = model(imgs)
+            pred_ids = torch.argmax(gen_output, dim=1)
 
             refs_for_batch = []
             for b in range(imgs.size(0)):
@@ -167,7 +173,7 @@ def main():
     for epoch in range(1, cfg.get("epochs", 10) + 1):
         train_loss = train_one_epoch(model, optimizer, crit, train_loader, cfg)
         # metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir)
-        metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer)
+        metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer, cfg)
         valid_loss = metrics["Valid Loss"]
 
         print(f"Epoch {epoch}/{cfg.get('epochs', 10)} | Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
