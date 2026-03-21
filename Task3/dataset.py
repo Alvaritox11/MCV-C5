@@ -81,7 +81,7 @@ class VizWizDataset(Dataset):
 
         cap_idx = torch.tensor(final_ids, dtype=torch.long)
 
-        return img_tensor, cap_idx, all_raw_captions
+        return img_id, img_tensor, cap_idx, all_raw_captions
 
 
 def extract_captions_from_img_ids(vw_api, img_ids):

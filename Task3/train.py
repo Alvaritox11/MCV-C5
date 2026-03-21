@@ -27,7 +27,7 @@ def train_one_epoch(model, optimizer, crit, dataloader, cfg):
     total_loss = 0
     loop = tqdm(dataloader, desc="Training", leave=False)
 
-    for imgs, captions, _ in loop:
+    for img_ids, imgs, captions, _ in loop:
         imgs, captions = imgs.to(device), captions.to(device)
 
         optimizer.zero_grad()
@@ -49,7 +49,7 @@ def train_one_epoch(model, optimizer, crit, dataloader, cfg):
 
 
 # def evaluate_and_log(model, crit, dataloader, epoch, output_dir):
-def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
+def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, run_predictions):
     model.eval()
     total_loss = 0
     all_preds = []
@@ -59,7 +59,7 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
 
     with torch.no_grad():
         loop = tqdm(dataloader, desc="Evaluating", leave=False)
-        for imgs, captions, all_raw_captions in loop:
+        for img_ids, imgs, captions, all_raw_captions in loop:
             imgs, captions = imgs.to(device), captions.to(device)
             output = model(imgs)
 
@@ -82,6 +82,16 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
                 #     if char not in ['<SOS>', '<PAD>']: pred_str += char
 
                 pred_str = tokenizer.decode(pred_ids[i].tolist())
+
+                # for dictionary prediction storage
+                current_id = str(img_ids[i].item() if torch.is_tensor(img_ids[i]) else img_ids[i])
+                
+                if current_id not in run_predictions:
+                    run_predictions[current_id] = {
+                        "references": refs_for_batch[i],
+                        "predictions": {}
+                    }
+                run_predictions[current_id]["predictions"][f"epoch_{epoch}"] = pred_str
 
                 batch_preds.append(pred_str)
                 all_preds.append(pred_str)
@@ -112,7 +122,7 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer):
     avg_loss = total_loss / len(dataloader)
 
     with open(os.path.join(output_dir, "predictions.json"), "w") as f:
-        json.dump({"predictions": all_preds, "references": all_refs}, f, indent=4)
+        json.dump(run_predictions, f, indent=4)
 
     bleu1_score = bleu.compute(predictions=all_preds, references=all_refs, max_order=1)['bleu']
     bleu2_score = bleu.compute(predictions=all_preds, references=all_refs, max_order=2)['bleu']
@@ -163,11 +173,13 @@ def main():
 
     best_valid_loss = float('inf')
 
+    run_predictions = {}
+
     print("Starting Training Loop...")
     for epoch in range(1, cfg.get("epochs", 10) + 1):
         train_loss = train_one_epoch(model, optimizer, crit, train_loader, cfg)
         # metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir)
-        metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer)
+        metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer, run_predictions)
         valid_loss = metrics["Valid Loss"]
 
         print(f"Epoch {epoch}/{cfg.get('epochs', 10)} | Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
