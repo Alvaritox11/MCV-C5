@@ -179,12 +179,16 @@ def main():
 
     best_valid_loss = float('inf')
 
+    early_stopping_enabled = cfg.get("early_stopping", False)
+    patience = cfg.get("early_stopping_patience", 3)
+    min_delta = cfg.get("early_stopping_min_delta", 0.0)
+    epochs_without_improvement = 0
+
     run_predictions = {}
 
     print("Starting Training Loop...")
     for epoch in range(1, cfg.get("epochs", 10) + 1):
         train_loss = train_one_epoch(model, optimizer, crit, train_loader, cfg)
-        # metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir)
         metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer, cfg, run_predictions)
         valid_loss = metrics["Valid Loss"]
 
@@ -193,9 +197,10 @@ def main():
 
         wandb.log({"epoch": epoch, "train_loss": train_loss, **metrics})
 
-        if valid_loss < best_valid_loss:
+        if valid_loss < best_valid_loss - min_delta:
             print(f"🌟 Validation loss improved from {best_valid_loss:.4f} to {valid_loss:.4f}. Saving checkpoint!")
             best_valid_loss = valid_loss
+            epochs_without_improvement = 0
 
             ckpt_path = os.path.join(output_dir, "checkpoints", "best_model.pth")
             torch.save({
@@ -205,6 +210,16 @@ def main():
                 'valid_loss': valid_loss,
             }, ckpt_path)
             wandb.save(ckpt_path)
+        else:
+            epochs_without_improvement += 1
+            print(
+                f"No significant validation improvement for {epochs_without_improvement} epoch(s). "
+                f"Best valid loss: {best_valid_loss:.4f}"
+            )
+
+            if early_stopping_enabled and epochs_without_improvement >= patience:
+                print(f"Early stopping triggered after {epoch} epochs.")
+                break
 
     wandb.finish()
     print("Training Complete!")
