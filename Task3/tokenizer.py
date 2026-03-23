@@ -50,7 +50,7 @@ class CharTokenizer(BaseTokenizer):
 
     def encode(self, text):
         tokens = self.tokenize(text)
-        return [self.token2idx.get(tok, self.unk_id) for tok in tokens]
+        return [self.token2idx.get(tok, 'self.unk_id') for tok in tokens]
 
     def decode(self, ids):
         tokens = []

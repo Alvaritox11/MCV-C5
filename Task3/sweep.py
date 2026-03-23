@@ -1,3 +1,5 @@
+# train.py
+
 import os
 import json
 import argparse
@@ -8,9 +10,9 @@ import torch.optim as optim
 from tqdm import tqdm
 import evaluate
 import matplotlib.pyplot as plt
-import numpy as np
-import cv2
+import datetime
 
+# import vocab
 from dataset import get_dataloaders
 from models import BaselineModel
 
@@ -19,7 +21,6 @@ rouge = evaluate.load('rouge')
 meteor = evaluate.load('meteor')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
 
 def train_one_epoch(model, optimizer, crit, dataloader, cfg):
     model.train()
@@ -36,6 +37,7 @@ def train_one_epoch(model, optimizer, crit, dataloader, cfg):
         else:
             preds = model(imgs)
 
+        # Shift captions by 1 to match the seq_len-1 output of the model
         loss = crit(preds, captions[:, 1:])
         loss.backward()
         optimizer.step()
@@ -45,63 +47,33 @@ def train_one_epoch(model, optimizer, crit, dataloader, cfg):
 
     return total_loss / len(dataloader)
 
+def build_optimizer(model, cfg):
+    opt_name = cfg.get("optimizer", "adam").lower()
+    lr = cfg.get("learning_rate", 1e-4)
+    weight_decay = cfg.get("weight_decay", 0.0)
 
-def get_token_list_from_ids(tokenizer, ids):
-    tokens = []
-    for idx in ids:
-        idx = int(idx)
-        if idx == tokenizer.eos_id:
-            break
-        if idx not in [tokenizer.sos_id, tokenizer.pad_id]:
-            if hasattr(tokenizer, "idx2token"):
-                tokens.append(tokenizer.idx2token[idx])
-            else:
-                # subword tokenizer fallback
-                tok = tokenizer.tokenizer.convert_ids_to_tokens([idx])[0]
-                tokens.append(tok)
-    return tokens
+    # Only optimize trainable parameters
+    params = [p for p in model.parameters() if p.requires_grad]
+
+    if opt_name == "adam":
+        return optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    elif opt_name == "adamw":
+        return optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    elif opt_name == "sgd":
+        return optim.SGD(params, lr=lr, weight_decay=weight_decay, momentum=0.9)
+    else:
+        raise ValueError(f"Unsupported optimizer: {cfg.get('optimizer')}")
 
 
-def save_attention_plot(unnorm_img, attn_maps_img, pred_ids_img, tokenizer, plot_path, max_words=6):
-    """
-    unnorm_img: (H, W, 3) numpy image in [0,1]
-    attn_maps_img: (seq_len, num_regions)
-    pred_ids_img: (seq_len,)
-    """
-    token_list = get_token_list_from_ids(tokenizer, pred_ids_img.tolist())
+def build_scheduler(optimizer, cfg):
+    if not cfg.get("lr_decay", False):
+        return None
 
-    if len(token_list) == 0:
-        token_list = ["<no prediction>"]
-
-    num_words = min(max_words, len(token_list), attn_maps_img.shape[0])
-
-    fig, axes = plt.subplots(1, num_words, figsize=(4 * num_words, 4))
-    if num_words == 1:
-        axes = [axes]
-
-    for t in range(num_words):
-        attn = attn_maps_img[t].detach().cpu().numpy()  # (num_regions,)
-        side = int(np.sqrt(attn.shape[0]))
-
-        if side * side != attn.shape[0]:
-            # fallback: skip overlay if shape is not square
-            axes[t].imshow(unnorm_img)
-            axes[t].axis('off')
-            axes[t].set_title(token_list[t], fontsize=10)
-            continue
-
-        attn = attn.reshape(side, side)
-        attn = cv2.resize(attn, (unnorm_img.shape[1], unnorm_img.shape[0]))
-        attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
-
-        axes[t].imshow(unnorm_img)
-        axes[t].imshow(attn, cmap='jet', alpha=0.45)
-        axes[t].axis('off')
-        axes[t].set_title(token_list[t], fontsize=10)
-
-    plt.tight_layout()
-    plt.savefig(plot_path, bbox_inches='tight')
-    plt.close(fig)
+    return optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=5,   # decay every 5 epochs
+        gamma=0.5      # halve the LR
+    )
 
 
 def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg, run_predictions):
@@ -126,9 +98,8 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
             loss = crit(loss_output, captions[:, 1:])
             total_loss += loss.item()
 
-            # ---- METRICS / GENERATION: always autoregressive ----
-            # Same logic as before, but optionally also returns attention maps
-            gen_output, attn_maps = model(imgs, return_attention=True)
+            # ---- METRICS: always autoregressive generation ----
+            gen_output = model(imgs)
             pred_ids = torch.argmax(gen_output, dim=1)
 
             refs_for_batch = []
@@ -137,10 +108,17 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
 
             batch_preds = []
             for i in range(pred_ids.shape[0]):
+                # pred_str = ""
+                # for char_id in pred_ids[i]:
+                #     char = vocab.IDX2CHAR[char_id.item()]
+                #     if char == '<EOS>': break
+                #     if char not in ['<SOS>', '<PAD>']: pred_str += char
+
                 pred_str = tokenizer.decode(pred_ids[i].tolist())
 
+                # for dictionary prediction storage
                 current_id = str(img_ids[i].item() if torch.is_tensor(img_ids[i]) else img_ids[i])
-
+                
                 if current_id not in run_predictions:
                     run_predictions[current_id] = {
                         "references": refs_for_batch[i],
@@ -152,7 +130,6 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
                 all_preds.append(pred_str)
                 all_refs.append(refs_for_batch[i])
 
-            # ---- QUALITATIVE PLOTS ----
             if not plot_saved:
                 plot_saved = True
                 mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
@@ -165,7 +142,6 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
                     gt_text = "\n".join([f"- {txt}" for txt in refs_for_batch[img_idx][:3]])
                     pred_text = batch_preds[img_idx]
 
-                    # Original qualitative image-caption plot (same idea as before)
                     fig, ax = plt.subplots(figsize=(8, 8))
                     ax.imshow(unnorm_img)
                     ax.axis('off')
@@ -175,27 +151,6 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
                     plt.savefig(plot_path, bbox_inches='tight')
                     wandb.log({f"Qualitative/Epoch_{epoch}_Img_{img_idx}": wandb.Image(plot_path)})
                     plt.close(fig)
-
-                    # Attention plot only if attention is active and maps are available
-                    if cfg.get("use_attention", False) and attn_maps is not None:
-                        attn_plot_path = os.path.join(
-                            output_dir,
-                            "plots",
-                            f"epoch_{epoch}_img_{img_idx}_attention.png"
-                        )
-
-                        save_attention_plot(
-                            unnorm_img=unnorm_img,
-                            attn_maps_img=attn_maps[img_idx],
-                            pred_ids_img=pred_ids[img_idx],
-                            tokenizer=tokenizer,
-                            plot_path=attn_plot_path,
-                            max_words=6
-                        )
-
-                        wandb.log({
-                            f"Attention/Epoch_{epoch}_Img_{img_idx}": wandb.Image(attn_plot_path)
-                        })
 
     avg_loss = total_loss / len(dataloader)
 
@@ -218,23 +173,33 @@ def evaluate_and_log(model, crit, dataloader, epoch, output_dir, tokenizer, cfg,
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, required=True, help='Path to the config.json file')
-    args = parser.parse_args()
+    #parser = argparse.ArgumentParser()
+    #parser.add_argument('--config', type=str, required=True, help='Path to the config.json file')
+    #args = parser.parse_args()
 
-    with open(args.config, 'r') as f:
+    with open("/ghome/group05/gerard/MCV-C5/Task3/configs/sweep_base.json", 'r') as f:
         cfg = json.load(f)
 
-    output_dir = os.path.join("outputs", cfg["run_name"])
-    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "plots"), exist_ok=True)
+    
 
     wandb.init(
         project=cfg["wandb_project"],
         entity=cfg["wandb_entity"],
-        name=cfg["run_name"],
+        name=cfg.get("run_name", None),
         config=cfg
     )
+
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = cfg.get("run_name", "experiment")
+    timed_run_name = f"{base_name}_{timestamp}"
+
+    # IMPORTANT: from here on, use sweep-overridden config
+    cfg = dict(wandb.config)
+
+    output_dir = os.path.join("outputs", timed_run_name)
+    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "plots"), exist_ok=True)
 
     print("Initializing DataLoaders...")
     train_loader, valid_loader, test_loader, tokenizer = get_dataloaders(cfg)
@@ -242,7 +207,8 @@ def main():
     print("Initializing Baseline Model...")
     model = BaselineModel(cfg, tokenizer).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=cfg.get("learning_rate", 1e-4))
+    optimizer = build_optimizer(model, cfg)
+    scheduler = build_scheduler(optimizer, cfg)
     crit = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_id)
 
     best_valid_loss = float('inf')
@@ -258,15 +224,17 @@ def main():
     for epoch in range(1, cfg.get("epochs", 10) + 1):
         train_loss = train_one_epoch(model, optimizer, crit, train_loader, cfg)
         metrics = evaluate_and_log(model, crit, valid_loader, epoch, output_dir, tokenizer, cfg, run_predictions)
+        if scheduler is not None:
+            scheduler.step()
         valid_loss = metrics["Valid Loss"]
 
         print(f"Epoch {epoch}/{cfg.get('epochs', 10)} | Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
-        print(f"Metrics: BLEU-1: {metrics['BLEU-1']:.1f}% | ROUGE-L: {metrics['ROUGE-L']:.1f}%")
+        print(f"Metrics: BLEU-1: {metrics['BLEU-1']:.1f}% | METEOR: {metrics['METEOR']:.1f}%")
 
         wandb.log({"epoch": epoch, "train_loss": train_loss, **metrics})
 
         if valid_loss < best_valid_loss - min_delta:
-            print(f"Validation loss improved from {best_valid_loss:.4f} to {valid_loss:.4f}. Saving checkpoint!")
+            print(f"🌟 Validation loss improved from {best_valid_loss:.4f} to {valid_loss:.4f}. Saving checkpoint!")
             best_valid_loss = valid_loss
             epochs_without_improvement = 0
 
@@ -276,6 +244,7 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'valid_loss': valid_loss,
+                'config': cfg
             }, ckpt_path)
             wandb.save(ckpt_path)
         else:

@@ -1,0 +1,23 @@
+program: sweep.py
+method: bayes
+name: bayes_opt_meteor_optimizer_lr_wd
+
+metric:
+  name: METEOR
+  goal: maximize
+
+parameters:
+  optimizer:
+    values: ["adam", "adamw", "sgd"]
+
+  learning_rate:
+    values: [1e-2, 1e-4, 5e-4, 5e-5]
+  weight_decay:
+    values: [0.0, 1e-4, 1e-5]
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--config"              
+  - "/ghome/group05/gerard/MCV-C5/Task3/configs/sweep_base.json"

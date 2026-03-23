@@ -1,7 +1,7 @@
 {
     "wandb_entity": "Team5-C5",
-    "wandb_project": "ImageCaptioning",
-    "run_name": "exp-resnet50-gru-word_best_setup_lr_decay",
+    "wandb_project": "ImageCaptioning_Sweep",
+    "run_name": "best_setup_lr_decay_resnet50_gru_word",
 
     "train_img_dir": "/ghome/group05/datasets/VizWiz/train",
     "val_img_dir": "/ghome/group05/datasets/VizWiz/val",
@@ -12,13 +12,22 @@
     "decoder": "GRU",
     "decoder_hidden_dim": 512,
     "decoder_num_layers": 1,
-    "decoder_dropout": 0,
+    "decoder_dropout": 0.0,
     "teacher_forcing": true,
-
     "freeze_encoder": false,
+
     "batch_size": 64,
     "epochs": 10,
-    "learning_rate": 1e-4,
+
+    "learning_rate": 0.0005,
+    "weight_decay": 0.00001,
+    "optimizer": "adamw",
+
     "text_level": "word",
-    "max_len": 50
+    "max_len": 50,
+
+    "early_stopping": true,
+    "early_stopping_patience": 4,
+    "early_stopping_min_delta": 0.001,
+    "lr_decay": true
 }

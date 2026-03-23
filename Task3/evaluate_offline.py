@@ -1,13 +1,17 @@
 import json
 import argparse
 import evaluate
+import os  # <--- FIXED 1: Added os import
 from tqdm import tqdm
 
 def main():
     parser = argparse.ArgumentParser(description="Compute per-image metrics offline.")
     parser.add_argument('--preds_file', type=str, required=True, help='Path to your predictions.json file')
     parser.add_argument('--epoch', type=str, default='epoch_10', help='Which epoch to evaluate (e.g., epoch_10)')
-    parser.add_argument('--output_file', type=str, default='detailed_metrics.json', help='Where to save the per-image results')
+    parser.add_argument('--output_dir', type=str, default='metrics_computed', help='Where to save the per-image results')
+    
+    # <--- FIXED 2: Added run_name as an argument instead of relying on an undefined 'cfg'
+    parser.add_argument('--run_name', type=str, default='experiment', help='Name of the run for the output file')
     args = parser.parse_args()
 
     print(f"Loading predictions from {args.preds_file}...")
@@ -63,11 +67,18 @@ def main():
     # Sort the results from highest score to lowest score
     results.sort(key=lambda x: x['Avg_Score'], reverse=True)
 
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # <--- FIXED 2: Use args.run_name
+    name = f"metrics_{args.run_name}.json"
+    output_file = os.path.join(args.output_dir, name)
+
     # Save to disk
-    with open(args.output_file, 'w') as f:
+    with open(output_file, 'w') as f:
         json.dump(results, f, indent=4)
 
-    print(f"\n✅ Saved detailed metrics to {args.output_file}")
+    # <--- FIXED 3: Use the local output_file variable, not args.output_file
+    print(f"\n✅ Saved detailed metrics to {output_file}")
     
     # --- Print Quick Summary ---
     if len(results) > 0:

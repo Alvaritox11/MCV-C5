@@ -2,9 +2,20 @@
 #SBATCH -n 4                    # Number of cores
 #SBATCH --mem 20000             # 16GB asked
 #SBATCH -p mhigh                # Choose mlow to submit to master low prioriy queue
-#SBATCH -q masterhigh           # Requeue other users mlow jobs
 #SBATCH --gres gpu:1            # To ask Pascales MAX 8
-#SBATCH -o logs/out_%u_%j.log   # File to which STDOUT will be written
-#SBATCH -e logs/err_%u_%j.log   # File to which STDERR will be written
+#SBATCH -o logs/FINAL_OUT_%u_%j.log   # File to which STDOUT will be written
+#SBATCH -e logs/FINAL_ERR_%u_%j.log   # File to which STDERR will be written
 
-python train.py --config configs/resnet50_gru_gerard_test.json
+# python train.py --config configs/resnet50_gru_gerard_test.json
+
+# python evaluate_ckpt.py --config /ghome/group05/alvaro/MCV-C5/Task3/configs/baseline.json \
+#                         --checkpoint /ghome/group05/alvaro/MCV-C5/Task3/outputs/baseline-resnet18-gru-char/checkpoints/best_model.pth \
+#                         --output_dir predictions_recovered/ \
+#                         --epoch_label 10
+
+# python train.py --config configs/attention_char.json
+
+python test_execution.py \
+  --checkpoint /ghome/group05/gerard/MCV-C5/Task3/outputs/sweep_base_resnet50_gru_word_20260321_190631/checkpoints/best_model.pth \
+  --save_predictions /ghome/group05/gerard/MCV-C5/Task3/outputs/eval_predictions.json \
+  --save_metrics /ghome/group05/gerard/MCV-C5/Task3/outputs/eval_metrics.txt

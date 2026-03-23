@@ -1,10 +1,22 @@
 #!/bin/bash 
 #SBATCH -n 4                    # Number of cores
 #SBATCH --mem 20000             # 16GB asked
-#SBATCH -p mlow                # Choose mlow to submit to master low prioriy queue
+#SBATCH -p mlow              # Choose mlow to submit to master low prioriy queue
 #SBATCH --gres gpu:1            # To ask Pascales MAX 8
 #SBATCH -o logs/out_%u_%j.log   # File to which STDOUT will be written
 #SBATCH -e logs/err_%u_%j.log   # File to which STDERR will be written
 
-python train.py --config configs/resnet50_gru_gerard_test2.json
-python train.py --config configs/resnet50_gru_gerard_test3.json
+# python train.py --config configs/resnet50_gru_gerard_test3.json
+
+# python evaluate_ckpt.py --config /ghome/group05/alvaro/MCV-C5/Task3/configs/baseline.json \
+#                         --checkpoint /ghome/group05/alvaro/MCV-C5/Task3/outputs/baseline-resnet18-gru-char/checkpoints/best_model.pth \
+#                         --output_dir predictions_recovered/ \
+#                         --epoch_label 10
+
+# python evaluate_ckpt.py --config /ghome/group05/alvaro/MCV-C5/Task3/configs/resnet50_gru.json \
+#                         --checkpoint /ghome/group05/alvaro/MCV-C5/Task3/outputs/exp-resnet50-gru-char/checkpoints/best_model.pth \
+#                         --output_dir predictions_recovered/ \
+#                         --epoch_label 10
+
+
+python train2.py --config configs/best_setup_lr_decay.json
