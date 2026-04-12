@@ -4,18 +4,23 @@
     "wandb_entity": "Team5-C5",
     
     "model_name": "nlpconnect/vit-gpt2-image-captioning",
-    "freeze_encoder": true,
-    "freeze_decoder": true,
+    "freeze_encoder": false,
+    "freeze_decoder": false,
     
     "train_ann_path": "/ghome/group05/datasets/VizWiz/annotations/train.json",
     "val_ann_path": "/ghome/group05/datasets/VizWiz/annotations/val.json",
     "train_img_dir": "/ghome/group05/datasets/VizWiz/train",
     "val_img_dir": "/ghome/group05/datasets/VizWiz/val",
     
-    "batch_size": 16,
-    "learning_rate": 5e-5,
+    "batch_size": 8,
+    "learning_rate": 1e-5,
+    "weight_decay": 0.01,
     "epochs": 10,
     "max_length": 50,
+    "dropout": 0.1,
+
+    "no_repeat_ngram_size": 3,
+    "num_beams":4,
     
     "early_stopping": true,
     "early_stopping_patience": 3,

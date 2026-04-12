@@ -292,8 +292,19 @@ class HFTransformerModel(nn.Module):
         config = AutoConfig.from_pretrained(model_name)
         config.tie_word_embeddings = False
         
-        self.model = VisionEncoderDecoderModel.from_pretrained(model_name)
-
+        dropout_rate = cfg.get("dropout", 0.0)
+        config.encoder.hidden_dropout_prob = dropout_rate
+        config.encoder.attention_probs_dropout_prob = dropout_rate
+        config.decoder.resid_pdrop = dropout_rate
+        config.decoder.embd_pdrop = dropout_rate
+        config.decoder.attn_pdrop = dropout_rate
+        
+        self.model = VisionEncoderDecoderModel.from_pretrained(
+            model_name, 
+            config=config,
+            use_safetensors=True
+        )
+        
         if cfg.get("freeze_encoder", False):
             for param in self.model.encoder.parameters():
                 param.requires_grad = False

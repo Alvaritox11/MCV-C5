@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
+from transformers import get_linear_schedule_with_warmup
+
 from dataset import get_dataloaders
 from models import BaselineModel, HFTransformerModel
 
@@ -21,12 +23,13 @@ meteor = evaluate.load('meteor')
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-def train_one_epoch(model, optimizer, dataloader, cfg):
+def train_one_epoch(model, optimizer, scheduler, dataloader, cfg):
     model.train()
     total_loss = 0
     loop = tqdm(dataloader, desc="Training", leave=False)
-
+    # i = 0
     for img_ids, pixel_values, labels, _ in loop:
+        # if i>10:break # DEBUG
         pixel_values, labels = pixel_values.to(device), labels.to(device)
         
         # Create attention mask for the decoder (1 for real tokens, 0 for padding)
@@ -42,10 +45,16 @@ def train_one_epoch(model, optimizer, dataloader, cfg):
         loss = outputs.loss
 
         loss.backward()
+        
+        # TRAINING ESTABILIZATION Add gradient clipping to stabilize updates
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         optimizer.step()
+        scheduler.step()
 
         total_loss += loss.item()
         loop.set_postfix(loss=loss.item())
+        # i+=1
 
     return total_loss / len(dataloader)
 
@@ -115,7 +124,7 @@ def evaluate_and_log(model, dataloader, epoch, output_dir, tokenizer, cfg, run_p
     all_refs = []
 
     plot_saved = False
-
+    
     with torch.no_grad():
         loop = tqdm(dataloader, desc="Evaluating", leave=False)
         for img_ids, pixel_values, labels, all_raw_captions in loop:
@@ -135,7 +144,10 @@ def evaluate_and_log(model, dataloader, epoch, output_dir, tokenizer, cfg, run_p
             # ---- METRICS / GENERATION: Hugging Face generate ----
             generated_ids = model.generate(
                 pixel_values, 
-                max_length=cfg.get("max_length", tokenizer.model_max_length)
+                max_length=cfg.get("max_length", tokenizer.model_max_length),
+                num_beams=cfg.get("num_beams", 4),
+                no_repeat_ngram_size=cfg.get("no_repeat_ngram_size", 3),
+                early_stopping=True
             )
             batch_preds = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
@@ -227,9 +239,7 @@ def main():
 
     print("Initializing Transformer Model...")
     model = HFTransformerModel(cfg).to(device)
-
-    optimizer = optim.Adam(model.parameters(), lr=cfg.get("learning_rate", 1e-4))
-
+    
     best_valid_loss = float('inf')
 
     early_stopping_enabled = cfg.get("early_stopping", False)
@@ -240,8 +250,21 @@ def main():
     run_predictions = {}
 
     print("Starting Training Loop...")
+
+    optimizer = optim.AdamW([{"params":model.model.encoder.parameters(), "lr":cfg.get("learning_rate", 5e-5)},
+                             {"params":model.model.decoder.parameters(), "lr":cfg.get("learning_rate", 5e-5)}],
+                            weight_decay=cfg.get("weight_decay", 0.01)
+                            )
+    
+    # Calculate steps for warmup (e.g., 10% of total training steps)
+    total_steps = len(train_loader) * cfg.get("epochs", 10)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, 
+        num_warmup_steps=int(0.1 * total_steps), 
+        num_training_steps=total_steps
+    )
     for epoch in range(1, cfg.get("epochs", 10) + 1):
-        train_loss = train_one_epoch(model, optimizer, train_loader, cfg)
+        train_loss = train_one_epoch(model, optimizer, scheduler, train_loader, cfg)
         metrics = evaluate_and_log(model, valid_loader, epoch, output_dir, tokenizer, cfg, run_predictions)
         valid_loss = metrics["Valid Loss"]
 

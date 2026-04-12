@@ -12,10 +12,15 @@
     "train_img_dir": "/ghome/group05/datasets/VizWiz/train",
     "val_img_dir": "/ghome/group05/datasets/VizWiz/val",
     
-    "batch_size": 16,
-    "learning_rate": 5e-5,
+    "batch_size": 8,
+    "learning_rate": 1e-5,
+    "weight_decay": 0.01,
     "epochs": 10,
     "max_length": 50,
+    "dropout": 0.1,
+
+    "no_repeat_ngram_size": 3,
+    "num_beams":4,
     
     "early_stopping": true,
     "early_stopping_patience": 3,
