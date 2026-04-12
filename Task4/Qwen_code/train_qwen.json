@@ -1,0 +1,31 @@
+{
+    "run_name":      "vit_qwen15b_lora",
+    "wandb_project": "mcv-c5-task4",
+    "wandb_entity":  "Team5-C5",
+    "model_type":    "vit_qwen_15b",
+    "decoder_name":  "Qwen/Qwen2.5-1.5B-Instruct",
+
+    "vit_checkpoint": "/ghome/group05/maiol/MCV-C5/Task4/outputs/vit_train_gpt2_train/checkpoints/best_model_safetensors",
+
+    "lora_r":        16,
+    "lora_alpha":    32,
+    "lora_dropout":  0.1,
+
+    "train_ann_path": "/ghome/group05/datasets/VizWiz/annotations/train.json",
+    "val_ann_path":   "/ghome/group05/datasets/VizWiz/annotations/val.json",
+    "train_img_dir":  "/ghome/group05/datasets/VizWiz/train",
+    "val_img_dir":    "/ghome/group05/datasets/VizWiz/val",
+
+    "epochs":        15,
+    "batch_size": 2,
+    "gradient_accumulation_steps": 4,
+    "num_workers":   4,
+    "learning_rate": 1e-4,
+    "max_length":    128,
+
+    "early_stopping":           true,
+    "early_stopping_patience":  5,
+    "early_stopping_min_delta": 0.001,
+
+    "checkpoint_path": "outputs/vit_qwen15b_lora/checkpoints/best_model.pth"
+}
