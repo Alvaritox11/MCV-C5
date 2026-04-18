@@ -85,7 +85,7 @@ class VizWizDataset(Dataset):
 
         cap_idx = torch.tensor(final_ids, dtype=torch.long)
 
-        return img_id, img_tensor, cap_idx, all_raw_captions
+        return str(img_id), img_tensor, cap_idx, all_raw_captions
 
 
 class SyntheticDataset(Dataset):
@@ -131,7 +131,7 @@ class SyntheticDataset(Dataset):
 
         cap_idx = torch.tensor(final_ids, dtype=torch.long)
 
-        return img_id, img_tensor, cap_idx, all_raw_captions
+        return str(img_id), img_tensor, cap_idx, all_raw_captions
 
 
 def extract_captions_from_img_ids(vw_api, img_ids):
@@ -196,3 +196,89 @@ def get_dataloaders(cfg):
     test_loader = DataLoader(test_dataset, batch_size=cfg["batch_size"], shuffle=False)
 
     return train_loader, valid_loader, test_loader, tokenizer
+
+
+def get_kfold_dataloaders(cfg, fold_idx):
+    """
+    Get dataloaders for a specific fold in K-fold cross-validation.
+    
+    Strategy:
+    1. Split original VizWiz data into K folds
+    2. Use fold_idx as validation set (real data only)
+    3. Use remaining K-1 folds as training set (real data)
+    4. Augment training set with ALL synthetic data
+    
+    Args:
+        cfg: Configuration dictionary
+        fold_idx: Current fold index (0 to k_folds-1)
+    
+    Returns:
+        train_loader, valid_loader, tokenizer
+    """
+    print("Loading annotations for K-Fold...")
+    vw_train_full = VizWiz(cfg["train_ann_path"])
+    
+    # Get all training image IDs and shuffle with fixed seed
+    all_train_img_ids = vw_train_full.getImgIds()
+    random.seed(42)
+    random.shuffle(all_train_img_ids)
+    
+    # Calculate fold sizes
+    k_folds = cfg.get("k_folds", 5)
+    total_samples = len(all_train_img_ids)
+    fold_size = total_samples // k_folds
+    
+    # Create folds
+    folds = []
+    for i in range(k_folds):
+        start_idx = i * fold_size
+        # Last fold gets any remaining samples
+        end_idx = (i + 1) * fold_size if i < k_folds - 1 else total_samples
+        folds.append(all_train_img_ids[start_idx:end_idx])
+    
+    # Select validation fold (real data only)
+    valid_ids = folds[fold_idx]
+    
+    # Select training folds (all other folds)
+    train_ids = []
+    for i, fold in enumerate(folds):
+        if i != fold_idx:
+            train_ids.extend(fold)
+    
+    print(f"Fold {fold_idx + 1}/{k_folds} | Train size: {len(train_ids)} | Valid size: {len(valid_ids)}")
+    
+    # Build tokenizer from training captions ONLY (not validation)
+    train_captions = extract_captions_from_img_ids(vw_train_full, train_ids)
+    
+    # Include synthetic captions in tokenizer vocabulary
+    synthetic_data = False
+    if "synthetic_ann_path" in cfg and "synthetic_img_dir" in cfg:
+        print("Loading synthetic annotations for tokenizer...")
+        with open(cfg["synthetic_ann_path"], 'r') as f:
+            syn_json = json.load(f)
+        syn_captions = [item['caption'] for item in syn_json]
+        train_captions.extend(syn_captions)
+        synthetic_data = True
+    
+    tokenizer = build_tokenizer(cfg, train_captions)
+    print(f"Tokenizer built | text_level={cfg.get('text_level', 'char')} | vocab_size={tokenizer.vocab_size} | max_len={tokenizer.max_len}")
+    
+    # Create training dataset (real data from K-1 folds)
+    train_dataset = VizWizDataset(vw_train_full, train_ids, cfg["train_img_dir"], tokenizer)
+    
+    # Augment training set with ALL synthetic data
+    if synthetic_data:
+        syn_dataset = SyntheticDataset(cfg["synthetic_ann_path"], cfg["synthetic_img_dir"], tokenizer)
+        train_dataset = ConcatDataset([train_dataset, syn_dataset])
+        print(f"Added {len(syn_dataset)} synthetic samples to training dataset for fold {fold_idx + 1}.")
+    
+    # Create validation dataset (real data only from current fold)
+    valid_dataset = VizWizDataset(vw_train_full, valid_ids, cfg["train_img_dir"], tokenizer)
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=cfg["batch_size"], shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=cfg["batch_size"], shuffle=False)
+    
+    print(f"Final dataset sizes - Train: {len(train_dataset)} | Valid: {len(valid_dataset)}")
+    
+    return train_loader, valid_loader, tokenizer
